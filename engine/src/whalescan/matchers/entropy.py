@@ -103,23 +103,46 @@ def _literal_src(quote: str) -> str:
 
 _LITERAL_SRC: Final = "|".join(_literal_src(q) for q in ('"', "'", "`"))
 
-_PLACEHOLDER: Final = re.compile(
-    r"x{6,}|\*{4,}|<[^>]{1,64}>|\$\{[^}]{1,64}\}|\{\{[^}]{1,64}\}\}"
-    r"|(?:your|my|example|sample|dummy|fake|test|changeme|placeholder|redacted|replace)[_-]?[a-z0-9_-]{0,40}",
-    re.IGNORECASE,
-)
-_REPEAT: Final = re.compile(r"(.)\1{5,}")
-_UUID: Final = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
-_HEX: Final = re.compile(r"[0-9a-fA-F]+")
-# The spec's digest words; `sha` also covers `sha1`/`sha256`/… since `\b` never splits `sha256`.
-_DIGEST_CONTEXT: Final = re.compile(
-    r"\b(?:sha(?:1|224|256|384|512)?|commit|rev|ref|digest|checksum|integrity|uses)\b", re.IGNORECASE
-)
-_CAMEL: Final = re.compile(r"(?<=[a-z])(?=[A-Z])")
-_UPPER: Final = re.compile(r"[A-Z]")
-_LOWER: Final = re.compile(r"[a-z]")
-_DIGIT: Final = re.compile(r"[0-9]")
-_HEX_LETTER: Final = re.compile(r"[A-Fa-f]")
+
+class _Filters(NamedTuple):
+    """Per-token filter regexes, compiled on the first candidate token (not at import)."""
+
+    placeholder: re.Pattern[str]
+    repeat: re.Pattern[str]
+    uuid: re.Pattern[str]
+    hex: re.Pattern[str]
+    digest_context: re.Pattern[str]
+    camel: re.Pattern[str]
+    upper: re.Pattern[str]
+    lower: re.Pattern[str]
+    digit: re.Pattern[str]
+    hex_letter: re.Pattern[str]
+
+
+@lru_cache(maxsize=1)
+def _filters() -> _Filters:
+    return _Filters(
+        placeholder=re.compile(
+            r"x{6,}|\*{4,}|<[^>]{1,64}>|\$\{[^}]{1,64}\}|\{\{[^}]{1,64}\}\}"
+            r"|(?:your|my|example|sample|dummy|fake|test|changeme|placeholder|redacted|replace)"
+            r"[_-]?[a-z0-9_-]{0,40}",
+            re.IGNORECASE,
+        ),
+        repeat=re.compile(r"(.)\1{5,}"),
+        uuid=re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}"),
+        hex=re.compile(r"[0-9a-fA-F]+"),
+        # The spec's digest words; `sha` also covers `sha1`/`sha256`/… since `\b` never splits `sha256`.
+        digest_context=re.compile(
+            r"\b(?:sha(?:1|224|256|384|512)?|commit|rev|ref|digest|checksum|integrity|uses)\b", re.IGNORECASE
+        ),
+        camel=re.compile(r"(?<=[a-z])(?=[A-Z])"),
+        upper=re.compile(r"[A-Z]"),
+        lower=re.compile(r"[a-z]"),
+        digit=re.compile(r"[0-9]"),
+        hex_letter=re.compile(r"[A-Fa-f]"),
+    )
+
+
 _QUOTES: Final = frozenset("\"'`")
 
 _REGIONS_KEY: Final = "entropy.regions"
@@ -315,10 +338,11 @@ def _tokens(ctx: FileCtx, charset: str, scope: str) -> list[_Token]:
 
 
 def _classes_ok(tok: str, min_classes: int, is_hex: bool) -> bool:
-    digit = _DIGIT.search(tok) is not None
+    f = _filters()
+    digit = f.digit.search(tok) is not None
     if is_hex:
-        return digit + (_HEX_LETTER.search(tok) is not None) >= min(min_classes, 2)
-    return digit + (_UPPER.search(tok) is not None) + (_LOWER.search(tok) is not None) >= min_classes
+        return digit + (f.hex_letter.search(tok) is not None) >= min(min_classes, 2)
+    return digit + (f.upper.search(tok) is not None) + (f.lower.search(tok) is not None) >= min_classes
 
 
 def _is_sequential(tok: str) -> bool:
@@ -326,7 +350,7 @@ def _is_sequential(tok: str) -> bool:
 
 
 def _is_placeholder(s: str) -> bool:
-    return _PLACEHOLDER.fullmatch(s) is not None
+    return _filters().placeholder.fullmatch(s) is not None
 
 
 def _enclosing(text: str, tok: _Token) -> str:
@@ -347,7 +371,7 @@ def _enclosing(text: str, tok: _Token) -> str:
 
 def _words(s: str) -> str:
     """`commitSha`, `git_commit`, `image.sha256` -> space-separated words for `\\b` matching."""
-    return _CAMEL.sub(" ", s).replace("_", " ").replace(".", " ")
+    return _filters().camel.sub(" ", s).replace("_", " ").replace(".", " ")
 
 
 class _Scorer:
@@ -374,13 +398,14 @@ class _Scorer:
         return rx.search(_norm(window)) is not None
 
     def _digest_context(self, tok: _Token) -> bool:
-        if tok.key and _DIGEST_CONTEXT.search(_words(tok.key)):
+        digest = _filters().digest_context
+        if tok.key and digest.search(_words(tok.key)):
             return True
         line = self.ctx.line_of(tok.start)
         got = self._digest_lines.get(line)
         if got is None:
             got = self._digest_lines[line] = (
-                _DIGEST_CONTEXT.search(_words(self.ctx.line_text(line))) is not None
+                digest.search(_words(self.ctx.line_text(line))) is not None
             )
         return got
 
@@ -397,7 +422,8 @@ class _Scorer:
         thr = threshold_for(p.charset.name, size, p.threshold, p.delta)
         if h < thr:
             return None
-        if _REPEAT.search(s) is not None or _is_sequential(s):
+        f = _filters()
+        if f.repeat.search(s) is not None or _is_sequential(s):
             return None
         if _is_placeholder(s):
             return None
@@ -405,9 +431,9 @@ class _Scorer:
         if value != s and _is_placeholder(value):
             return None
         keyword = self._has_keyword(tok)
-        if not keyword and _UUID.fullmatch(s) is not None:
+        if not keyword and f.uuid.fullmatch(s) is not None:
             return None
-        if size in (40, 64) and _HEX.fullmatch(s) is not None and self._digest_context(tok):
+        if size in (40, 64) and f.hex.fullmatch(s) is not None and self._digest_context(tok):
             return None
         if any(rx.search(s) is not None for rx in p.excludes):
             return None

@@ -35,7 +35,7 @@ def make_rule(match: Any = None, *, max_hits: int = 50) -> Rule:
 
 def run(spec: Any, text: str, **rule_kw: Any) -> tuple[list[Hit], FileCtx]:
     ctx = FileCtx(path="f.txt", text=text)
-    return match_multiline(spec, ctx, make_rule({"multiline": spec}, **rule_kw)), ctx
+    return list(match_multiline(spec, ctx, make_rule({"multiline": spec}, **rule_kw))), ctx
 
 
 def spans(hits: list[Hit]) -> list[tuple[int, int]]:
@@ -43,8 +43,9 @@ def spans(hits: list[Hit]) -> list[tuple[int, int]]:
 
 
 PRIVATE_KEY = "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[A-Za-z0-9+/=\\s]{64,8192}-----END"
-KEY_BODY = "\n".join(["MIIEowIBAAKCAQEA7nq3Zr9m1kQ2vX8w0cT4yJ5uHh6LdPq9sR2tF3gB4nV5c6x7"] * 5)
-PEM = f"-----BEGIN RSA PRIVATE KEY-----\n{KEY_BODY}\n-----END RSA PRIVATE KEY-----\n"
+# Assembled from fragments so this file holds no key-shaped literal of its own.
+KEY_BODY = "\n".join(["MIIEowIBAAKCAQEA" + "7nq3Zr9m1kQ2vX8w" + "0cT4yJ5uHh6LdPq9" + "sR2tF3gB4nV5c6x7"] * 5)
+PEM = "-----BEGIN RSA " + f"PRIVATE KEY-----\n{KEY_BODY}\n-----END RSA " + "PRIVATE KEY-----\n"
 
 AIRFLOW = {
     "sequence": [r"\bBashOperator\(", r"""bash_command\s*=\s*f?["']""", r"\{\{\s*(?:dag_run\.conf|params)\b"],
@@ -270,7 +271,9 @@ def reference_sequence(text: str, patterns: list[str], within: int) -> list[tupl
 @settings(max_examples=400, deadline=None)
 @given(
     text=st.text(alphabet="abc\n ", max_size=120),
-    patterns=st.lists(st.sampled_from(["a", "b", "c", "ab", "b+", "c\n?a", "^a", "b$"]), min_size=2, max_size=4),
+    patterns=st.lists(
+        st.sampled_from(["a", "b", "c", "ab", "b+", "c\n?a", "^a", "b$"]), min_size=2, max_size=4
+    ),
     within=st.integers(min_value=0, max_value=6),
 )
 def test_sequence_matches_spec_reference(text: str, patterns: list[str], within: int) -> None:

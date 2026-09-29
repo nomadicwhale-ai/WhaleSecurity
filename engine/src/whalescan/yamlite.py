@@ -25,7 +25,8 @@ what a security scanner needs over round-tripping:
   block scalars), a line holding only ``{{ ... }}`` output between entries is skipped, and inline
   ``{{ ... }}`` is an opaque run inside a plain (string) scalar.
 
-Error messages never quote document text, which may hold secrets; they carry positions only.
+Line breaks are those of libyaml (LF, CRLF, CR, NEL, LS, PS), as in the parsers that consume these
+files. Error messages never quote document text, which may hold secrets; they carry positions only.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from __future__ import annotations
 import gc
 import re
 from bisect import bisect_right
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from itertools import accumulate, repeat
 from operator import add
 from typing import Any, ClassVar, Final, NoReturn
@@ -71,6 +72,8 @@ MAX_ALIASES: Final = 10_000
 _MAX_NUMBER_CHARS: Final = 1000
 #: Texts longer than this are parsed with the cyclic garbage collector paused.
 _GC_PAUSE_CHARS: Final = 32 * 1024
+#: Tests turn this off to check the single-regex fast paths against the general parser.
+_FAST_PATHS = True
 
 SCHEMAS: Final = ("yaml11", "yaml12")
 
@@ -240,15 +243,23 @@ class ScalarNode(Node):
     _v: Any
 
     def __init__(
-        self, raw: str, style: str, tag: str | None, anchor: str | None, start: int, end: int, src: _Source
+        self,
+        raw: str,
+        style: str,
+        start: int,
+        end: int,
+        src: _Source,
+        *,
+        tag: str | None = None,
+        anchor: str | None = None,
     ) -> None:
         self.raw = raw
         self.style = style
-        self.tag = tag
-        self.anchor = anchor
         self.start = start
         self.end = end
         self._src = src
+        self.tag = tag
+        self.anchor = anchor
 
     @property
     def value(self) -> Any:
@@ -281,14 +292,21 @@ class SeqNode(Node):
     items: list[Node]
 
     def __init__(
-        self, items: list[Node], tag: str | None, anchor: str | None, start: int, end: int, src: _Source
+        self,
+        items: list[Node],
+        start: int,
+        end: int,
+        src: _Source,
+        *,
+        tag: str | None = None,
+        anchor: str | None = None,
     ) -> None:
         self.items = items
-        self.tag = tag
-        self.anchor = anchor
         self.start = start
         self.end = end
         self._src = src
+        self.tag = tag
+        self.anchor = anchor
 
     def values(self) -> list[Node]:
         return list(self.items)
@@ -315,18 +333,19 @@ class MapNode(Node):
     def __init__(
         self,
         items: list[tuple[KeyNode, Node]],
-        tag: str | None,
-        anchor: str | None,
         start: int,
         end: int,
         src: _Source,
+        *,
+        tag: str | None = None,
+        anchor: str | None = None,
     ) -> None:
         self.items = items
-        self.tag = tag
-        self.anchor = anchor
         self.start = start
         self.end = end
         self._src = src
+        self.tag = tag
+        self.anchor = anchor
 
     def values(self) -> list[Node]:
         return [v for _, v in self.items]
@@ -364,15 +383,23 @@ class KeyNode(_Spanned):
     style: str
 
     def __init__(
-        self, raw: str, style: str, tag: str | None, anchor: str | None, start: int, end: int, src: _Source
+        self,
+        raw: str,
+        style: str,
+        start: int,
+        end: int,
+        src: _Source,
+        *,
+        tag: str | None = None,
+        anchor: str | None = None,
     ) -> None:
         self.raw = raw
         self.style = style
-        self.tag = tag
-        self.anchor = anchor
         self.start = start
         self.end = end
         self._src = src
+        self.tag = tag
+        self.anchor = anchor
 
     @property
     def value(self) -> str:
@@ -392,7 +419,17 @@ class Document:
     An empty document (``---`` alone) has an empty plain scalar (null) root.
     """
 
-    __slots__ = ("_src", "end", "error", "explicit_end", "explicit_start", "index", "root", "start", "version")
+    __slots__ = (
+        "_src",
+        "end",
+        "error",
+        "explicit_end",
+        "explicit_start",
+        "index",
+        "root",
+        "start",
+        "version",
+    )
 
     def __init__(
         self,
@@ -401,20 +438,21 @@ class Document:
         index: int,
         start: int,
         end: int,
-        explicit_start: bool,
-        explicit_end: bool,
-        version: str | None,
+        *,
         src: _Source,
+        explicit_start: bool = False,
+        explicit_end: bool = False,
+        version: str | None = None,
     ) -> None:
         self.root = root
         self.error = error
         self.index = index
         self.start = start
         self.end = end
+        self._src = src
         self.explicit_start = explicit_start
         self.explicit_end = explicit_end
         self.version = version
-        self._src = src
 
     @property
     def schema(self) -> str:
@@ -558,8 +596,8 @@ def resolve_scalar(raw: str, schema: str = "yaml12", style: str = PLAIN, tag: st
 
     Untagged plain scalars follow ``schema``; quoted and block scalars are strings. ``!!str``,
     ``!!int``, ``!!float``, ``!!bool`` and ``!!null`` tags convert when the text allows it and fall
-    back to the string otherwise; every other tag (``!Ref``, ``!vault``, ``!!binary``) yields the
-    string content. Never raises for any input text.
+    back to the string otherwise; every other tag (``!Ref``, ``!vault``, ``!!binary``, and the
+    non-specific ``!``) yields the string content. Never raises for any input text.
     """
     if schema not in SCHEMAS:
         raise ValueError(f"unknown YAML schema {schema!r}; expected one of {SCHEMAS}")
@@ -567,8 +605,6 @@ def resolve_scalar(raw: str, schema: str = "yaml12", style: str = PLAIN, tag: st
         if style != PLAIN:
             return raw
         return _resolve_plain(raw, schema)
-    if tag == "!!str" or tag == "!":
-        return raw
     if tag == "!!null":
         return None
     if tag == "!!bool":
@@ -605,6 +641,8 @@ def _type_name(v: Any) -> str:
 # backtracks at most once per run instead of trying every split of it.
 _FIRST_B = r"""[^ \t\-?:,\[\]{}#&*!|>'"%@`]|[-?:](?=[^ \t])"""
 _BODY_B = r"""[^ \t:#]+(?![^ \t:#])|:(?=[^ \t])|(?<=[^ \t])\#|[ \t]+(?=[^ \t\#:]|:[^ \t])"""
+# Flow context: flow indicators end a scalar; like libyaml, only `-` (not `?`/`:`) may start one
+# when followed by a non-blank.
 _FIRST_F = r"""[^ \t\-?:,\[\]{}#&*!|>'"%@`]|-(?=[^ \t])"""
 _BODY_F = (
     r"""[^ \t:#,\[\]{}]+(?![^ \t:#,\[\]{}])|:(?=[^ \t,\[\]{}])|(?<=[^ \t])\#"""
@@ -624,21 +662,19 @@ _BODY_FH = (
 )
 _ANCH = r"[^ \t,\[\]{}:#]+"
 _KEY_TAIL = r"[ \t]*:(?:[ \t]+|\Z)"
-
-
-def _key_re(first: str, body: str) -> re.Pattern[str]:
-    # Groups: 1 plain key, 2 double-quoted body, 3 single-quoted body, 4 alias name.
-    return re.compile(
-        rf"""(?:((?:{first})(?:{body})*)|"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*(?:''[^']*)*)'|\*({_ANCH})){_KEY_TAIL}"""
-    )
+_DQ = r'"([^"\\]*(?:\\.[^"\\]*)*)"'
+_SQ = r"'([^']*(?:''[^']*)*)'"
 
 
 class _Lex:
+    """The plain-scalar-dependent regexes of one mode (normal or Helm lenient)."""
+
     __slots__ = ("cont_b", "cont_f", "entry", "item", "key", "plain_b", "plain_f")
 
     def __init__(self, fb: str, bb: str, ff: str, bf: str) -> None:
         plain = f"(?:{fb})(?:{bb})*"
-        self.key = _key_re(fb, bb)
+        # Groups: 1 plain key, 2 double-quoted body, 3 single-quoted body, 4 alias name.
+        self.key = re.compile(rf"(?:({plain})|{_DQ}|{_SQ}|\*({_ANCH})){_KEY_TAIL}")
         self.plain_b = re.compile(plain)
         self.cont_b = re.compile(f"(?:{bb})*")
         self.plain_f = re.compile(f"(?:{ff})(?:{bf})*")
@@ -646,14 +682,17 @@ class _Lex:
         # Fast path for mapping entries with a plain key: one match classifies the whole line.
         # Groups: 1 key; 2 plain value (3: a comment follows it); 4 double-quoted body without
         # escapes; 5 single-quoted body without ''; 6 (empty) where any other value starts. No
-        # value group set: nothing but a comment after the colon.
+        # value group set: nothing but a comment after the colon. A comment after a plain scalar
+        # needs whitespace before its '#' (the lookbehind), or backtracking could end the scalar
+        # early at `a#b` and read the rest as a comment.
         self.entry = re.compile(
-            rf"""({plain})[ \t]*:(?:(?:[ \t]+\#.*)?\Z|[ \t]+(?:({plain})[ \t]*(\#.*)?\Z"""
+            rf"""({plain})[ \t]*:(?:(?:[ \t]+\#.*)?\Z|[ \t]+(?:({plain})[ \t]*(?:(?<=[ \t])(\#.*))?\Z"""
             rf"""|"([^"\\]*)"[ \t]*(?:\#.*)?\Z|'([^']*)'[ \t]*(?:\#.*)?\Z|()))"""
         )
         # Fast path for a whole sequence item: plain (2: a comment follows), or simple quoted.
         self.item = re.compile(
-            rf"""({plain})[ \t]*(\#.*)?\Z|"([^"\\]*)"[ \t]*(?:\#.*)?\Z|'([^']*)'[ \t]*(?:\#.*)?\Z"""
+            rf"""({plain})[ \t]*(?:(?<=[ \t])(\#.*))?\Z"""
+            rf"""|"([^"\\]*)"[ \t]*(?:\#.*)?\Z|'([^']*)'[ \t]*(?:\#.*)?\Z"""
         )
 
 
@@ -663,14 +702,14 @@ _LEX: dict[bool, _Lex] = {}
 def _lex(helm: bool) -> _Lex:
     lx = _LEX.get(helm)
     if lx is None:
-        lx = _LEX[helm] = (
-            _Lex(_FIRST_BH, _BODY_BH, _FIRST_FH, _BODY_FH) if helm else _Lex(_FIRST_B, _BODY_B, _FIRST_F, _BODY_F)
-        )
+        if helm:
+            lx = _Lex(_FIRST_BH, _BODY_BH, _FIRST_FH, _BODY_FH)
+        else:
+            lx = _Lex(_FIRST_B, _BODY_B, _FIRST_F, _BODY_F)
+        _LEX[helm] = lx
     return lx
 
 
-_WS = re.compile(r"[ \t]*")
-_FWS = re.compile(r"[ \t]*(?:#.*)?")
 _DQ_LINE = re.compile(r'([^"\\]*(?:\\.[^"\\]*)*)"')
 _DQ_BODY = re.compile(r'[^"\\]*(?:\\.[^"\\]*)*')
 _SQ_LINE = re.compile(r"([^']*(?:''[^']*)*)'")
@@ -680,7 +719,6 @@ _ALIAS = re.compile(r"\*(" + _ANCH + ")")
 _TAG = re.compile(r"!(?:<([^>]*)>|(!?)([^ \t,\[\]{}!<]*))")
 _BLOCK_HEAD = re.compile(r"[|>]([0-9+-]*)[ \t]*(?:#.*)?\Z")
 _YAML_DIRECTIVE = re.compile(r"%YAML[ \t]+([0-9]+)\.([0-9]+)[ \t]*(?:#.*)?\Z")
-_MARKER = re.compile(r"^(?:---|\.\.\.)(?=[ \t\r\n]|\Z)", re.M)
 _BREAK_SPLIT = re.compile("(\r\n|[\r\n\x85  ])")
 _SURROGATE = re.compile("[\ud800-\udfff]")
 _ESCAPE = re.compile(r"\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)")
@@ -701,6 +739,9 @@ _TPL_LINE = re.compile(r"(?:\{\{(?:[^}]+(?![^}])|\}(?!\}))*\}\}[ \t]*)+(?:#.*)?\
 _TAB_MSG: Final = "tab character used for indentation"
 _DEPTH_MSG: Final = f"nesting deeper than {MAX_DEPTH} levels"
 _NODES_MSG: Final = f"more than {MAX_NODES} nodes"
+# _block_node modes
+_BLOCK_OK: Final = 1  # a block collection may start here (line start, or after `- `)
+_SEQ_OK: Final = 2  # an indentless sequence may be the node (mapping values)
 
 
 def _unescape(body: str) -> str:
@@ -725,7 +766,7 @@ def _unescape(body: str) -> str:
 
 
 def _norm_tag(m: re.Match[str]) -> str | None:
-    """Normalize a tag match; ``None`` for an unsupported named handle or empty verbatim tag."""
+    """Normalize a tag match; ``None`` when empty (``!!``, ``!<>``)."""
     verbatim = m.group(1)
     if verbatim is not None:
         if not verbatim:
@@ -757,15 +798,27 @@ def _split_lines(text: str) -> tuple[list[str], list[int], list[str] | None]:
     lines = parts[0::2]
     brks = parts[1::2]
     starts = list(accumulate(map(add, map(len, lines), map(len, brks)), initial=0))
-    starts = starts[: len(lines)]
-    return lines, starts, brks
+    return lines, starts[: len(lines)], brks
 
 
 def _marker_kind(s: str) -> str | None:
     if s[:3] in ("---", "...") and (len(s) == 3 or s[3] in " \t"):
         return s[:3]
-    if s[:1] == "%":
-        return "%"
+    return None
+
+
+def _skip_ws(s: str, c: int) -> int:
+    n = len(s)
+    while c < n and s[c] in " \t":
+        c += 1
+    return c
+
+
+def _end(m: re.Match[str] | None, default: int) -> int:
+    return default if m is None else m.end()
+
+
+def _no_match(s: str, pos: int) -> re.Match[str] | None:
     return None
 
 
@@ -781,21 +834,22 @@ def _utf8_len_exceeds(text: str, limit: int) -> bool:
 
 
 class _Chunk:
-    """One document's line range, found by the marker pre-pass."""
+    """One document's line range: from ``lo`` (its ``---`` line or first content line) to ``hi``."""
 
-    __slots__ = ("col0", "error", "explicit", "explicit_end", "hi", "lo", "version")
+    __slots__ = ("error", "explicit", "hi", "lo", "version")
 
-    def __init__(self, lo: int, col0: int, explicit: bool) -> None:
+    def __init__(self, lo: int, hi: int, explicit: bool) -> None:
         self.lo = lo
-        self.hi = lo
-        self.col0 = col0
+        self.hi = hi
         self.explicit = explicit
-        self.explicit_end = False
         self.version: str | None = None
         self.error: YamlError | None = None
 
 
 class _Parser:
+    """Recursive descent over lines. Block parsing works on (line, column) positions; every method
+    that parses a node leaves ``self.i`` (and, in flow context, ``self.c``) just after it."""
+
     def __init__(self, text: str, src: _Source, helm: bool) -> None:
         self.src = src
         self.helm = helm
@@ -817,17 +871,21 @@ class _Parser:
         self.lines = lines
         self.starts = starts
         self.brk = brk
-        if "\t" in work:
-            self.ind = [len(s) - len(s.lstrip(" ")) for s in lines]
-            self.cc = [len(s) - len(s.lstrip(" \t")) for s in lines]
-        else:
-            self.ind = self.cc = [len(s) - len(s.lstrip(" ")) for s in lines]
+        # ind: leading spaces; cc: first column that is neither space nor tab (== len if blank)
+        self.ind = [len(s) - len(s.lstrip(" ")) for s in lines]
+        self.cc = [len(s) - len(s.lstrip(" \t")) for s in lines] if "\t" in work else self.ind
         self.skip: frozenset[int] = frozenset(bisect_right(starts, off) - 1 for off in blanked)
         self.last = len(lines) - 1
         lx = _lex(helm)
         self.key_match = lx.key.match
-        self.entry_match = lx.entry.match
-        self.item_match = lx.item.match
+        self.slow = not _FAST_PATHS
+        self.entry_match: Callable[[str, int], re.Match[str] | None] = (
+            _no_match if self.slow else lx.entry.match
+        )
+        self.item_match: Callable[[str, int], re.Match[str] | None] = (
+            _no_match if self.slow else lx.item.match
+        )
+        self.fnode: Callable[[int, int, int], Node] = self._fnode_slow if self.slow else self._fnode
         self.plain_b = lx.plain_b.match
         self.cont_b = lx.cont_b.match
         self.plain_f = lx.plain_f.match
@@ -844,16 +902,17 @@ class _Parser:
 
     def _fail(self, msg: str, i: int, c: int) -> NoReturn:
         lines = self.lines
-        if i >= len(lines):
-            off = len(self.src.text)
-        else:
-            off = self.starts[i] + max(0, min(c, len(lines[i])))
-        line, col = self.src.pos(off)
-        raise YamlError(msg, line, col, off)
+        off = len(self.src.text) if i >= len(lines) else self.starts[i] + max(0, min(c, len(lines[i])))
+        self._fail_at(msg, off)
 
     def _fail_at(self, msg: str, off: int) -> NoReturn:
         line, col = self.src.pos(off)
         raise YamlError(msg, line, col, off)
+
+    def _err_line(self, msg: str, i: int, c: int = 0) -> YamlError:
+        off = self.starts[i] + c
+        line, col = self.src.pos(off)
+        return YamlError(msg, line, col, off)
 
     def _bump(self, i: int, c: int) -> None:
         self.count += 1
@@ -861,11 +920,11 @@ class _Parser:
             self._fail(_NODES_MSG, i, c)
 
     def _open(self, depth: int, i: int, c: int) -> int:
+        """Account for a new collection below level ``depth``; returns its own level."""
         lvl = depth + 1
         if lvl > MAX_DEPTH:
             self._fail(_DEPTH_MSG, i, c)
-        if lvl > self.maxd:
-            self.maxd = lvl
+        self.maxd = max(self.maxd, lvl)
         self._bump(i, c)
         return lvl
 
@@ -875,9 +934,9 @@ class _Parser:
         return n0, d0
 
     def _anchor_end(self, name: str, node: Node, n0: int, d0: int, depth: int) -> None:
+        """Register an anchor with the size and height its aliases will add when expanded."""
         height = self.maxd - depth
-        if d0 > self.maxd:
-            self.maxd = d0
+        self.maxd = max(self.maxd, d0)
         self.anchors[name] = (node, self.count - n0, height)
 
     def _next_content(self, i: int) -> int:
@@ -923,7 +982,7 @@ class _Parser:
         if self.brk is None:
             return " " if empties == 0 else "\n" * empties
         first = self._brk(li)
-        rest = "".join(self._brk(li + 1 + t) or "\n" for t in range(empties))
+        rest = "".join(self._brk(li + 1 + t) for t in range(empties))
         if first not in ("\n", ""):
             return first + rest
         return rest if empties else " "
@@ -931,7 +990,7 @@ class _Parser:
     def _finish_line(self, i: int, c: int) -> None:
         """After a node that ended mid-line in block context, only a comment may follow."""
         s = self.lines[i]
-        k = _WS.match(s, c).end()
+        k = _skip_ws(s, c)
         if k < len(s) and s[k] != "#":
             if s[k] == ":":
                 self._fail("mapping values are not allowed here (complex or multi-line key?)", i, k)
@@ -964,7 +1023,7 @@ class _Parser:
             c = end = m.end()
             if c < n and s[c] not in " \t" and not (flow and s[c] in ",[]{}"):
                 self._fail("a node property must be followed by a space", i, c)
-            c = _WS.match(s, c).end()
+            c = _skip_ws(s, c)
         return anchor, tag, end, c
 
     def _merge_prop(self, outer: str | None, inner: str | None, what: str, i: int, c: int) -> str | None:
@@ -978,15 +1037,18 @@ class _Parser:
         """Ascending indices of ``---`` and ``...`` marker lines (the only hard document boundaries)."""
         lines = self.lines
         if self.brk is None and not self.bom:
-            cand = [bisect_right(self.starts, m.start()) - 1 for m in _MARKER.finditer(self.work)]
+            work = self.work
+            starts = self.starts
+            cand = [0]
+            for pat in ("\n---", "\n..."):
+                k = work.find(pat)
+                while k != -1:
+                    cand.append(bisect_right(starts, k + 1) - 1)
+                    k = work.find(pat, k + 4)
+            cand.sort()
         else:
             cand = [k for k, s in enumerate(lines) if s[:3] in ("---", "...")]
-        return [k for k in cand if _marker_kind(lines[k]) in ("---", "...")]
-
-    def _err_line(self, msg: str, i: int, c: int = 0) -> YamlError:
-        off = self.starts[i] + c
-        line, col = self.src.pos(off)
-        return YamlError(msg, line, col, off)
+        return [k for k in cand if _marker_kind(lines[k]) is not None]
 
     def _directives(self, ch: _Chunk, dirs: list[int]) -> None:
         for k in dirs:
@@ -1034,8 +1096,7 @@ class _Parser:
                     break
                 j += 1
             if j < k:  # a bare document (no '---')
-                ch = _Chunk(j, 0, False)
-                ch.hi = k
+                ch = _Chunk(j, k, False)
                 if directives:
                     ch.error = self._err_line("directives must be followed by a '---' marker", directives[0])
                     directives = []
@@ -1045,22 +1106,19 @@ class _Parser:
                 break
             s = lines[k]
             if s[:3] == "...":
-                rest = _WS.match(s, 3).end()
+                rest = _skip_ws(s, 3)
                 if rest < len(s) and s[rest] != "#":
-                    bad = _Chunk(k, 3, False)
-                    bad.hi = k + 1
+                    bad = _Chunk(k, k + 1, False)
                     bad.error = self._err_line("content after the '...' document end marker", k, rest)
                     self._emit(bad, docs, strict)
                 pos = k + 1
                 continue
-            ch = _Chunk(k, 3, True)
-            ch.hi = marks[mi + 1] if mi + 1 < len(marks) else n
+            ch = _Chunk(k, marks[mi + 1] if mi + 1 < len(marks) else n, True)
             self._directives(ch, directives)
             directives = []
             pos = self._emit(ch, docs, strict)
         if directives:
-            bad = _Chunk(directives[0], 0, False)
-            bad.hi = n
+            bad = _Chunk(directives[0], n, False)
             bad.error = self._err_line("directives must be followed by a '---' marker", directives[0])
             self._emit(bad, docs, strict)
         self.anchors = {}
@@ -1076,7 +1134,7 @@ class _Parser:
             try:
                 root, resume = self._document(ch)
             except YamlError as exc:
-                err = exc.with_traceback(None)
+                err = exc.with_traceback(None)  # no frame cycles pinning the parser
             except RecursionError:  # defensive: the depth limit keeps recursion far below this
                 err = self._err_line(_DEPTH_MSG, ch.lo)
         if err is not None:
@@ -1090,8 +1148,11 @@ class _Parser:
         explicit_end = resume == ch.hi and ch.hi < len(lines) and lines[ch.hi][:3] == "..."
         end = starts[resume] if resume < len(starts) else len(self.src.text)
         docs.append(
-            Document(root, err, len(docs), starts[ch.lo], end, ch.explicit, explicit_end, ch.version, self.src)
-        )
+            Document(
+                root, err, len(docs), starts[ch.lo], end,
+                src=self.src, explicit_start=ch.explicit, explicit_end=explicit_end, version=ch.version,
+            )
+        )  # fmt: skip
         return resume
 
     def _document(self, ch: _Chunk) -> tuple[Node, int]:
@@ -1102,14 +1163,15 @@ class _Parser:
         empty_off = self.starts[i]
         if ch.explicit:
             s = self.lines[i]
-            k = _WS.match(s, 3).end()
+            k = _skip_ws(s, 3)
             empty_off += 3
             if k < len(s) and s[k] != "#":
-                node = self._block_node(i, k, -1, 0, False, False, None, None)
+                # block collections cannot start on the '---' line
+                node = self._block_node(i, k, -1, 0, 0)
                 return node, self._doc_end(self.i)
         else:
             i -= 1
-        node = self._below(i, -1, 0, empty_off, None, None, False)
+        node = self._below(i, -1, 0, empty_off)
         return node, self._doc_end(self.i)
 
     def _doc_end(self, i: int) -> int:
@@ -1123,19 +1185,30 @@ class _Parser:
     # -------------------------------------------------------------------- block context
 
     def _below(
-        self, i: int, parent: int, depth: int, empty_off: int, anchor: str | None, tag: str | None, seq_ok: bool
+        self,
+        i: int,
+        parent: int,
+        depth: int,
+        empty_off: int,
+        *,
+        seq_ok: bool = False,
+        anchor: str | None = None,
+        tag: str | None = None,
     ) -> Node:
         """The node whose content starts on a line after ``i`` (more indented than ``parent``), an
         indentless sequence (``seq_ok``), or an empty (null) scalar at ``empty_off``."""
         hi = self.hi
         j = self._next_content(i + 1)
         if self.helm and j < hi and self._is_tpl(j):
+            # a template line is the value only if no real content follows at this depth
             k = j
             while True:
                 k = self._next_content(k + 1)
                 if k >= hi or not self._is_tpl(k):
                     break
-            if k < hi and (self.ind[k] > parent or (seq_ok and self.ind[k] == parent and self._is_dash(k, parent))):
+            if k < hi and (
+                self.ind[k] > parent or (seq_ok and self.ind[k] == parent and self._is_dash(k, parent))
+            ):
                 j = k
         if j < hi and parent < 0 and self.lines[j][:1] == "%":
             j = hi  # a directive line: the (empty) root ends here
@@ -1144,15 +1217,11 @@ class _Parser:
             if ind > parent:
                 if self.cc[j] != ind:
                     self._fail(_TAB_MSG, j, ind)
-                return self._block_node(j, ind, parent, depth, True, seq_ok, anchor, tag)
+                mode = _BLOCK_OK | _SEQ_OK if seq_ok else _BLOCK_OK
+                return self._block_node(j, ind, parent, depth, mode, anchor=anchor, tag=tag)
             if seq_ok and ind == parent and self._is_dash(j, ind):
                 return self._block_seq(j, ind, depth, anchor, tag)
-        if anchor is not None:
-            n0, d0 = self._anchor_begin(depth)
-        self._bump(i + 1, 0)
-        node = ScalarNode("", PLAIN, tag, anchor, empty_off, empty_off, self.src)
-        if anchor is not None:
-            self._anchor_end(anchor, node, n0, d0, depth)
+        node = self._empty(empty_off, depth, i + 1, 0, anchor=anchor, tag=tag)
         self.i = i + 1
         return node
 
@@ -1162,43 +1231,44 @@ class _Parser:
         c: int,
         parent: int,
         depth: int,
-        block_ok: bool,
-        seq_ok: bool,
-        anchor: str | None,
-        tag: str | None,
+        mode: int,
+        *,
+        anchor: str | None = None,
+        tag: str | None = None,
     ) -> Node:
-        """A node whose first character is at (i, c) in block context. ``block_ok`` allows a block
-        collection to start here (line start or after ``- ``); ``parent`` is the enclosing block
-        indentation (-1 at the root); ``depth`` is the enclosing collection level."""
+        """A node whose first character is at (i, c) in block context. ``parent`` is the enclosing
+        block indentation (-1 at the root); ``depth`` is the enclosing collection level; ``mode``
+        holds ``_BLOCK_OK``/``_SEQ_OK``; ``anchor``/``tag`` came from a previous line."""
         s = self.lines[i]
         ch = s[c]
-        if ch == "&" or ch == "!":
+        if ch in "&!":
             pc = c
             a2, t2, pend, c = self._props(i, c, False)
             if c >= len(s) or s[c] == "#":
                 anchor = self._merge_prop(anchor, a2, "anchor", i, pc)
                 tag = self._merge_prop(tag, t2, "tag", i, pc)
-                return self._below(i, parent, depth, self.starts[i] + pend, anchor, tag, seq_ok)
-            if block_ok and self.key_match(s, c) is not None:
-                # `&a key: v`: the properties belong to the first key, the map starts at them.
+                off = self.starts[i] + pend
+                return self._below(i, parent, depth, off, seq_ok=bool(mode & _SEQ_OK), anchor=anchor, tag=tag)
+            if mode & _BLOCK_OK and (self.entry_match(s, c) is not None or self.key_match(s, c) is not None):
+                # `&a key: v`: the properties belong to the first key, the map starts at them
                 return self._block_map(i, pc, depth, anchor, tag)
             anchor = self._merge_prop(anchor, a2, "anchor", i, pc)
             tag = self._merge_prop(tag, t2, "tag", i, pc)
             ch = s[c]
-            block_ok = False
+            mode = 0  # a block collection cannot follow properties on their line
         n = len(s)
         if ch == "-" and (c + 1 == n or s[c + 1] in " \t"):
-            if not block_ok:
+            if not mode & _BLOCK_OK:
                 self._fail("block sequence entries are not allowed here", i, c)
             return self._block_seq(i, c, depth, anchor, tag)
         if ch == "?" and (c + 1 == n or s[c + 1] in " \t"):
             self._fail("complex mapping keys ('?') are not supported", i, c)
-        if ch == "|" or ch == ">":
-            return self._block_scalar(i, c, parent, depth, anchor, tag)
-        if block_ok:
+        if ch in "|>":
+            return self._block_scalar(i, c, parent, depth, anchor=anchor, tag=tag)
+        if mode & _BLOCK_OK:
             fm = self.entry_match(s, c)
-            if fm is not None or (ch in "\"'*" and self.key_match(s, c) is not None):
-                return self._block_map(i, c, depth, anchor, tag, fm)
+            if fm is not None or ((self.slow or ch in "\"'*") and self.key_match(s, c) is not None):
+                return self._block_map(i, c, depth, anchor, tag, first=fm)
         if ch == "*":
             if anchor is not None or tag is not None:
                 self._fail("an alias cannot have properties", i, c)
@@ -1206,24 +1276,30 @@ class _Parser:
             self._finish_line(self.i, self.c)
             return node
         if ch == "[" or (ch == "{" and not (self.helm and s.startswith("{{", c))):
-            fnode = self._flow(i, c, depth, anchor, tag)
+            node = self._flow(i, c, depth, anchor, tag)
             self._finish_line(self.i, self.c)
-            return fnode
+            return node
         if anchor is not None:
             n0, d0 = self._anchor_begin(depth)
-        if ch == '"' or ch == "'":
+        if ch in "\"'":
             raw = self._dquoted(i, c) if ch == '"' else self._squoted(i, c)
             self._bump(i, c)
-            node: ScalarNode = ScalarNode(
-                raw, DOUBLE if ch == '"' else SINGLE, tag, anchor, self.starts[i] + c,
-                self.starts[self.i] + self.c, self.src,
-            )  # fmt: skip
+            end = self.starts[self.i] + self.c
+            snode = ScalarNode(
+                raw,
+                DOUBLE if ch == '"' else SINGLE,
+                self.starts[i] + c,
+                end,
+                self.src,
+                tag=tag,
+                anchor=anchor,
+            )
             self._finish_line(self.i, self.c)
         else:
-            node = self._plain_block(i, c, parent, tag, anchor)
+            snode = self._plain_block(i, c, parent, anchor=anchor, tag=tag)
         if anchor is not None:
-            self._anchor_end(anchor, node, n0, d0, depth)
-        return node
+            self._anchor_end(anchor, snode, n0, d0, depth)
+        return snode
 
     def _block_seq(self, i: int, c: int, depth: int, anchor: str | None, tag: str | None) -> SeqNode:
         if anchor is not None:
@@ -1232,22 +1308,23 @@ class _Parser:
         lines = self.lines
         starts = self.starts
         ind = self.ind
+        cc = self.cc
         hi = self.hi
+        helm = self.helm
+        src = self.src
+        item_match = self.item_match
         indent = c
         start = starts[i] + c
-        cc = self.cc
-        item_match = self.item_match
-        src = self.src
-        helm = self.helm
         items: list[Node] = []
         while True:
             s = lines[i]
             n = len(s)
             k = c + 1
-            while k < n and (s[k] == " " or s[k] == "\t"):
+            while k < n and s[k] in " \t":
                 k += 1
+            item: Node
             if k >= n or s[k] == "#":
-                item = self._below(i, indent, lvl, starts[i] + c + 1, None, None, False)
+                item = self._below(i, indent, lvl, starts[i] + c + 1)
             else:
                 fm = item_match(s, k) if s[k] not in "&!*[{|>" else None
                 if fm is not None:
@@ -1271,15 +1348,15 @@ class _Parser:
                         else:
                             vend = base + ve
                             self.i = j
-                        item = ScalarNode(pv, PLAIN, None, None, base + k, vend, src)
+                        item = ScalarNode(pv, PLAIN, base + k, vend, src)
                     else:
                         self.i = j
                         if dv is not None:
-                            item = ScalarNode(dv, DOUBLE, None, None, base + k, base + fm.end(3) + 1, src)
+                            item = ScalarNode(dv, DOUBLE, base + k, base + fm.end(3) + 1, src)
                         else:
-                            item = ScalarNode(sv, SINGLE, None, None, base + k, base + fm.end(4) + 1, src)
+                            item = ScalarNode(sv, SINGLE, base + k, base + fm.end(4) + 1, src)
                 else:
-                    item = self._block_node(i, k, indent, lvl, True, False, None, None)
+                    item = self._block_node(i, k, indent, lvl, _BLOCK_OK)
             items.append(item)
             j = self.i
             while j < hi:
@@ -1301,15 +1378,22 @@ class _Parser:
                 break
             i = j
         self.i = j
-        end = max(items[-1].end, start + 1)
-        node = SeqNode(items, tag, anchor, start, end, self.src)
+        node = SeqNode(items, start, max(items[-1].end, start + 1), src, tag=tag, anchor=anchor)
         if anchor is not None:
             self._anchor_end(anchor, node, n0, d0, depth)
         return node
 
     def _block_map(
-        self, i: int, c: int, depth: int, anchor: str | None, tag: str | None, first: re.Match[str] | None = None
+        self,
+        i: int,
+        c: int,
+        depth: int,
+        anchor: str | None,
+        tag: str | None,
+        *,
+        first: re.Match[str] | None = None,
     ) -> MapNode:
+        """A block mapping whose first entry is at (i, c); ``first`` is its entry match if known."""
         if anchor is not None:
             n0, d0 = self._anchor_begin(depth)
         lvl = self._open(depth, i, c)
@@ -1318,12 +1402,12 @@ class _Parser:
         ind = self.ind
         cc = self.cc
         hi = self.hi
+        helm = self.helm
+        src = self.src
         key_match = self.key_match
+        entry_match = self.entry_match
         indent = c
         start = starts[i] + c
-        entry_match = self.entry_match
-        src = self.src
-        helm = self.helm
         items: list[tuple[KeyNode, Node]] = []
         merge = False
         while True:
@@ -1334,13 +1418,14 @@ class _Parser:
                 first = None
             else:
                 fm = entry_match(s, c)
+            value: Node
             if fm is not None:
                 # fast path: a plain key (and a simple one-line value, or none)
                 kraw, pv, com, dv, sv, cx = fm.groups()
                 self.count += 2
                 if self.count > MAX_NODES:
                     self._fail(_NODES_MSG, i, c)
-                key = KeyNode(kraw, PLAIN, None, None, base + c, base + fm.end(1), src)
+                key = KeyNode(kraw, PLAIN, base + c, base + fm.end(1), src)
                 if kraw == "<<":
                     merge = True
                 if cx is not None:
@@ -1348,9 +1433,9 @@ class _Parser:
                     v = fm.start(6)
                     if v >= len(s):
                         colon = s.index(":", fm.end(1))
-                        value = self._below(i, indent, lvl, base + colon + 1, None, None, True)
+                        value = self._below(i, indent, lvl, base + colon + 1, seq_ok=True)
                     else:
-                        value = self._block_node(i, v, indent, lvl, False, True, None, None)
+                        value = self._block_node(i, v, indent, lvl, _SEQ_OK)
                 elif pv is not None:
                     vs = fm.start(2)
                     ve = fm.end(2)
@@ -1366,21 +1451,38 @@ class _Parser:
                     else:
                         vend = base + ve
                         self.i = j
-                    value: Node = ScalarNode(pv, PLAIN, None, None, base + vs, vend, src)
+                    value = ScalarNode(pv, PLAIN, base + vs, vend, src)
                 elif dv is not None:
-                    value = ScalarNode(dv, DOUBLE, None, None, base + fm.start(4) - 1, base + fm.end(4) + 1, src)
+                    value = ScalarNode(dv, DOUBLE, base + fm.start(4) - 1, base + fm.end(4) + 1, src)
                     self.i = i + 1
                 elif sv is not None:
-                    value = ScalarNode(sv, SINGLE, None, None, base + fm.start(5) - 1, base + fm.end(5) + 1, src)
+                    value = ScalarNode(sv, SINGLE, base + fm.start(5) - 1, base + fm.end(5) + 1, src)
                     self.i = i + 1
                 else:
-                    self.count -= 1  # the value is parsed (and counted) below
-                    colon = s.index(":", fm.end(1))
-                    value = self._below(i, indent, lvl, base + colon + 1, None, None, True)
+                    self.count -= 1  # the value is counted where it is parsed
+                    j = i + 1
+                    t = lines[j] if j < hi else ""
+                    k = cc[j] if j < hi else 0
+                    hop = False
+                    if k < len(t) and ind[j] == k > indent and not helm:
+                        # direct hop (what _below/_block_node would do) for the dominant shape:
+                        # the next line opens a nested mapping or sequence
+                        ch = t[k]
+                        if ch == "-" and (k + 1 == len(t) or t[k + 1] in " \t"):
+                            value = self._block_seq(j, k, lvl, None, None)
+                            hop = True
+                        elif ch not in "&!*|>[{\"'?#%@`":
+                            fm2 = entry_match(t, k)
+                            if fm2 is not None:
+                                value = self._block_map(j, k, lvl, None, None, first=fm2)
+                                hop = True
+                    if not hop:
+                        colon = s.index(":", fm.end(1))
+                        value = self._below(i, indent, lvl, base + colon + 1, seq_ok=True)
             else:
                 m = key_match(s, c)
                 if m is not None:
-                    key = self._key(m, i, c, lvl, None, None)
+                    key = self._key(m, i, c, lvl)
                 else:
                     key, m = self._key_with_props(i, c, lvl)
                 if key.style == PLAIN and key.raw == "<<":
@@ -1388,9 +1490,9 @@ class _Parser:
                 v = m.end()
                 if v >= len(s) or s[v] == "#":
                     colon = s.rfind(":", c, v)
-                    value = self._below(i, indent, lvl, base + colon + 1, None, None, True)
+                    value = self._below(i, indent, lvl, base + colon + 1, seq_ok=True)
                 else:
-                    value = self._block_node(i, v, indent, lvl, False, True, None, None)
+                    value = self._block_node(i, v, indent, lvl, _SEQ_OK)
             items.append((key, value))
             j = self.i
             while j < hi:
@@ -1416,19 +1518,34 @@ class _Parser:
             c = ji
         self.i = j
         lk, lv = items[-1]
-        end = lv.end if lv.end > lk.end else lk.end
+        end = max(lv.end, lk.end)
         if merge:
             items = self._merge(items)
-        node = MapNode(items, tag, anchor, start, end, self.src)
+        node = MapNode(items, start, end, src, tag=tag, anchor=anchor)
         if anchor is not None:
             self._anchor_end(anchor, node, n0, d0, depth)
         return node
 
     def _key(
-        self, m: re.Match[str], i: int, c: int, depth: int, anchor: str | None, tag: str | None
+        self,
+        m: re.Match[str],
+        i: int,
+        c: int,
+        depth: int,
+        *,
+        anchor: str | None = None,
+        tag: str | None = None,
     ) -> KeyNode:
+        """A key from a ``key_match`` at (i, c) (after any properties)."""
         g = m.lastindex
         base = self.starts[i]
+        if g == 4:  # alias key: the aliased scalar's text
+            if anchor is not None or tag is not None:
+                self._fail("an alias cannot have properties", i, c)
+            target = self._alias_target(m.group(4), i, c, depth)
+            if not isinstance(target, ScalarNode):
+                self._fail("complex mapping keys are not supported", i, c)
+            return KeyNode(target.raw, target.style, base + c, base + m.end(4), self.src, tag=target.tag)
         if g == 1:
             raw = m.group(1)
             style = PLAIN
@@ -1438,31 +1555,26 @@ class _Parser:
             raw = self._unescape(body, i, m.start(2)) if "\\" in body else body
             style = DOUBLE
             end = m.end(2) + 1
-        elif g == 3:
+        else:
             raw = m.group(3).replace("''", "'")
             style = SINGLE
             end = m.end(3) + 1
-        else:
-            if anchor is not None or tag is not None:
-                self._fail("an alias cannot have properties", i, c)
-            target = self._alias_target(m.group(4), i, c, depth)
-            if not isinstance(target, ScalarNode):
-                self._fail("complex mapping keys are not supported", i, c)
-            return KeyNode(target.raw, target.style, target.tag, None, base + c, base + m.end(4), self.src)
         self._bump(i, c)
-        key = KeyNode(raw, style, tag, anchor, base + c, base + end, self.src)
-        if anchor is not None:
-            self.anchors[anchor] = (ScalarNode(raw, style, tag, anchor, base + c, base + end, self.src), 1, 0)
+        key = KeyNode(raw, style, base + c, base + end, self.src, tag=tag, anchor=anchor)
+        if anchor is not None:  # an alias of an anchored key yields its scalar
+            scalar = ScalarNode(raw, style, base + c, base + end, self.src, tag=tag, anchor=anchor)
+            self.anchors[anchor] = (scalar, 1, 0)
         return key
 
     def _key_with_props(self, i: int, c: int, depth: int) -> tuple[KeyNode, re.Match[str]]:
+        """A mapping entry that ``key_match`` rejected: properties before the key, or an error."""
         s = self.lines[i]
         ch = s[c]
-        if ch == "&" or ch == "!":
+        if ch in "&!":
             anchor, tag, _, k = self._props(i, c, False)
             m = self.key_match(s, k) if k < len(s) else None
             if m is not None:
-                return self._key(m, i, k, depth, anchor, tag), m
+                return self._key(m, i, k, depth, anchor=anchor, tag=tag), m
             self._fail("could not find the ':' of a mapping key", i, k)
         if ch == "?" and (c + 1 == len(s) or s[c + 1] in " \t"):
             self._fail("complex mapping keys ('?') are not supported", i, c)
@@ -1478,19 +1590,19 @@ class _Parser:
         merged: list[tuple[KeyNode, Node]] = []
         explicit: list[tuple[KeyNode, Node]] = []
         for k, v in items:
-            if not k.is_merge:
+            if k.raw != "<<" or k.style != PLAIN or k.tag not in (None, "!!merge"):
                 explicit.append((k, v))
                 continue
             if isinstance(v, MapNode):
                 merged.extend(v.items)
             elif isinstance(v, SeqNode):
                 subs: list[list[tuple[KeyNode, Node]]] = []
-                for s in v.items:
-                    if not isinstance(s, MapNode):
+                for sub in v.items:
+                    if not isinstance(sub, MapNode):
                         self._fail_at("a merge key needs a mapping or a sequence of mappings", k.start)
-                    subs.append(s.items)
-                for sub in reversed(subs):
-                    merged.extend(sub)
+                    subs.append(sub.items)
+                for sub_items in reversed(subs):
+                    merged.extend(sub_items)
             else:
                 self._fail_at("a merge key needs a mapping or a sequence of mappings", k.start)
         if not merged:
@@ -1505,6 +1617,7 @@ class _Parser:
         return kept + explicit
 
     def _alias_target(self, name: str, i: int, c: int, depth: int) -> Node:
+        """Resolve an alias, charging its expansion to the alias, node and depth budgets."""
         entry = self.anchors.get(name)
         if entry is None:
             self._fail("undefined alias (anchors must be defined before use; recursion is not allowed)", i, c)
@@ -1517,8 +1630,7 @@ class _Parser:
             self._fail(_NODES_MSG + " (alias expansion)", i, c)
         if depth + height > MAX_DEPTH:
             self._fail(_DEPTH_MSG + " (alias expansion)", i, c)
-        if depth + height > self.maxd:
-            self.maxd = depth + height
+        self.maxd = max(self.maxd, depth + height)
         return node
 
     def _alias(self, i: int, c: int, depth: int) -> Node:
@@ -1530,24 +1642,24 @@ class _Parser:
         self.c = m.end()
         return node
 
-    def _plain_block(self, i: int, c: int, parent: int, tag: str | None, anchor: str | None) -> ScalarNode:
+    def _plain_block(self, i: int, c: int, parent: int, *, anchor: str | None, tag: str | None) -> ScalarNode:
         s = self.lines[i]
         m = self.plain_b(s, c)
         if m is None:
             self._fail("a plain scalar cannot start with this character", i, c)
         e = m.end()
         base = self.starts[i]
-        k = _WS.match(s, e).end()
+        k = _skip_ws(s, e)
         if k < len(s):
             if s[k] == ":":
                 self._fail("mapping values are not allowed here", i, k)
-            raw = s[c:e]
+            raw = s[c:e]  # a comment follows: no continuation
             end = base + e
             self.i = i + 1
         else:
             raw, end = self._plain_more(i, c, e, parent)
         self._bump(i, c)
-        return ScalarNode(raw, PLAIN, tag, anchor, base + c, end, self.src)
+        return ScalarNode(raw, PLAIN, base + c, end, self.src, tag=tag, anchor=anchor)
 
     def _plain_more(self, i: int, c: int, e: int, parent: int) -> tuple[str, int]:
         """Continuation lines of a block plain scalar ending at (i, e) at the end of its line."""
@@ -1569,7 +1681,7 @@ class _Parser:
                 continue
             if s[k] == "#" or ind[j] <= parent:
                 break
-            e2 = cont(s, k).end()
+            e2 = _end(cont(s, k), k)
             if e2 == k:
                 break
             if chunks is None:
@@ -1578,7 +1690,7 @@ class _Parser:
             chunks.append(s[k:e2])
             empties = 0
             end_i, end_e = j, e2
-            t = _WS.match(s, e2).end()
+            t = _skip_ws(s, e2)
             if t < len(s):
                 if s[t] == ":":
                     self._fail("mapping values are not allowed here (implicit keys must be one line)", j, t)
@@ -1588,7 +1700,10 @@ class _Parser:
         raw = lines[i][c:e] if chunks is None else "".join(chunks)
         return raw, self.starts[end_i] + end_e
 
-    def _block_scalar(self, i: int, c: int, parent: int, depth: int, anchor: str | None, tag: str | None) -> Node:
+    def _block_scalar(
+        self, i: int, c: int, parent: int, depth: int, *, anchor: str | None, tag: str | None
+    ) -> ScalarNode:
+        """A literal (``|``) or folded (``>``) scalar, with PyYAML's folding and chomping rules."""
         lines = self.lines
         s = lines[i]
         m = _BLOCK_HEAD.match(s, c)
@@ -1613,38 +1728,36 @@ class _Parser:
         ind = self.ind
         hi = self.hi
         skip = self.skip
-        k = i + 1
         if incr:
             indent = min_ind + incr - 1
-        else:
+        else:  # auto-detect: the most spaces among leading empty lines and the first content line
             max_ind = 0
+            k = i + 1
             while k < hi:
                 if k in skip:
                     k += 1
                     continue
                 sp = ind[k]
-                if sp > max_ind:
-                    max_ind = sp
+                max_ind = max(max_ind, sp)
                 if sp < len(lines[k]):
                     break
                 k += 1
             indent = max(min_ind, max_ind)
-            k = i + 1
         chunks: list[str] = []
         breaks: list[str] = []
         line_break = ""
         last_content = -1
-        started = False
         leading_ns = False
+        k = i + 1
         while k < hi:
-            if k in skip:
+            if k in skip:  # a blanked Helm control line is invisible
                 k += 1
                 continue
             t = lines[k]
             sp = ind[k]
             if sp >= indent and len(t) > indent:
                 content = t[indent:]
-                if started:
+                if last_content >= 0:
                     if folded and line_break == "\n" and leading_ns and content[0] not in " \t":
                         if not breaks:
                             chunks.append(" ")
@@ -1656,9 +1769,8 @@ class _Parser:
                 chunks.append(content)
                 line_break = self._brk(k)
                 last_content = k
-                started = True
             elif sp == len(t) or (sp >= indent and len(t) == indent):
-                breaks.append(self._brk(k) or "")
+                breaks.append(self._brk(k))
             else:
                 break
             k += 1
@@ -1668,14 +1780,19 @@ class _Parser:
             chunks.extend(breaks)
         self.i = k
         start = self.starts[i] + c
-        end = self.starts[last_content] + len(lines[last_content]) if last_content >= 0 else start + 1 + len(flags)
+        end = (
+            self.starts[last_content] + len(lines[last_content])
+            if last_content >= 0
+            else start + 1 + len(flags)
+        )
         self._bump(i, c)
-        node = ScalarNode("".join(chunks), FOLDED if folded else LITERAL, tag, anchor, start, end, self.src)
+        style = FOLDED if folded else LITERAL
+        node = ScalarNode("".join(chunks), style, start, end, self.src, tag=tag, anchor=anchor)
         if anchor is not None:
             self._anchor_end(anchor, node, n0, d0, depth)
         return node
 
-    # -------------------------------------------------------------------- scalars
+    # -------------------------------------------------------------------- quoted scalars
 
     def _unescape(self, body: str, i: int, c: int) -> str:
         try:
@@ -1684,6 +1801,7 @@ class _Parser:
             self._fail("invalid escape sequence in a double-quoted scalar", i, c + exc.index)
 
     def _dquoted(self, i: int, c: int) -> str:
+        """A double-quoted scalar at (i, c); leaves (self.i, self.c) after its closing quote."""
         s = self.lines[i]
         m = _DQ_LINE.match(s, c + 1)
         if m is not None:
@@ -1699,7 +1817,7 @@ class _Parser:
         b = c + 1
         while True:
             s = lines[k]
-            e = _DQ_BODY.match(s, b).end()
+            e = _end(_DQ_BODY.match(s, b), b)
             if e < len(s) and s[e] == '"':
                 chunks.append(self._unescape(s[b:e], k, b))
                 self.i = k
@@ -1712,7 +1830,7 @@ class _Parser:
                 t = len(s)
                 while t > b and s[t - 1] in " \t":
                     t -= 1
-                if t < len(s):
+                if t < len(s):  # keep a trailing space that is itself escaped
                     q = t
                     while q > b and s[q - 1] == "\\":
                         q -= 1
@@ -1731,6 +1849,7 @@ class _Parser:
             b = cc[k]
 
     def _squoted(self, i: int, c: int) -> str:
+        """A single-quoted scalar at (i, c); leaves (self.i, self.c) after its closing quote."""
         s = self.lines[i]
         m = _SQ_LINE.match(s, c + 1)
         if m is not None:
@@ -1745,7 +1864,7 @@ class _Parser:
         b = c + 1
         while True:
             s = lines[k]
-            e = _SQ_BODY.match(s, b).end()
+            e = _end(_SQ_BODY.match(s, b), b)
             if e < len(s):
                 chunks.append(s[b:e].replace("''", "'"))
                 self.i = k
@@ -1771,19 +1890,24 @@ class _Parser:
         hi = self.hi
         while True:
             s = lines[i]
-            k = _FWS.match(s, c).end()
-            if k < len(s):
-                return i, k
+            n = len(s)
+            while c < n and s[c] in " \t":
+                c += 1
+            if c < n and s[c] != "#":
+                return i, c
             i += 1
             c = 0
             if i >= hi:
                 self._fail("unexpected end of document inside a flow collection", i - 1, len(lines[i - 1]))
 
-    def _empty(self, off: int, anchor: str | None, tag: str | None, depth: int, i: int, c: int) -> ScalarNode:
+    def _empty(
+        self, off: int, depth: int, i: int, c: int, *, anchor: str | None = None, tag: str | None = None
+    ) -> ScalarNode:
+        """An empty (null) plain scalar at offset ``off``."""
         if anchor is not None:
             n0, d0 = self._anchor_begin(depth)
         self._bump(i, c)
-        node = ScalarNode("", PLAIN, tag, anchor, off, off, self.src)
+        node = ScalarNode("", PLAIN, off, off, self.src, tag=tag, anchor=anchor)
         if anchor is not None:
             self._anchor_end(anchor, node, n0, d0, depth)
         return node
@@ -1791,7 +1915,7 @@ class _Parser:
     def _as_key(self, node: Node) -> KeyNode:
         if not isinstance(node, ScalarNode):
             self._fail_at("complex mapping keys are not supported", node.start)
-        return KeyNode(node.raw, node.style, node.tag, node.anchor, node.start, node.end, self.src)
+        return KeyNode(node.raw, node.style, node.start, node.end, self.src, tag=node.tag, anchor=node.anchor)
 
     def _flow(self, i: int, c: int, depth: int, anchor: str | None, tag: str | None) -> Node:
         """A flow collection starting at the bracket at (i, c); leaves (self.i, self.c) after it.
@@ -1804,9 +1928,11 @@ class _Parser:
         lvl = self._open(depth, i, c)
         lines = self.lines
         starts = self.starts
+        src = self.src
         start = starts[i] + c
         fws = self._fws
-        fnode = self._fnode
+        fnode = self.fnode
+        fast_keys = not self.slow
         node: Node
         if lines[i][c] == "[":
             items: list[Node] = []
@@ -1844,9 +1970,8 @@ class _Parser:
                         i, c = fws(i, c)
                 elif ch != "]":
                     self._fail("expected ',' or ']' in a flow sequence", i, c)
-            node = SeqNode(items, tag, anchor, start, starts[i] + c + 1, self.src)
+            node = SeqNode(items, start, starts[i] + c + 1, src, tag=tag, anchor=anchor)
         else:
-            src = self.src
             pairs: list[tuple[KeyNode, Node]] = []
             merge = False
             i, c = fws(i, c + 1)
@@ -1861,16 +1986,14 @@ class _Parser:
                     if ch == "?":
                         self._fail("complex mapping keys ('?') are not supported", i, c)
                     self._fail("expected a mapping key before ':'", i, c)
-                m = _DQ_LINE.match(s, c + 1) if ch == '"' else None
+                m = _DQ_LINE.match(s, c + 1) if ch == '"' and fast_keys else None
                 if m is not None:  # fast path: one-line double-quoted key (all JSON keys)
                     body = m.group(1)
                     self.count += 1
                     if self.count > MAX_NODES:
                         self._fail(_NODES_MSG, i, c)
-                    key = KeyNode(
-                        self._unescape(body, i, c + 1) if "\\" in body else body,
-                        DOUBLE, None, None, starts[i] + c, starts[i] + m.end(), src,
-                    )  # fmt: skip
+                    kraw = self._unescape(body, i, c + 1) if "\\" in body else body
+                    key = KeyNode(kraw, DOUBLE, starts[i] + c, starts[i] + m.end(), src)
                     c = m.end()
                     json_like = True
                 else:
@@ -1883,6 +2006,7 @@ class _Parser:
                 if c >= len(s) or s[c] in " \t#":
                     i, c = fws(i, c)
                     s = lines[i]
+                value: Node
                 if s[c] == ":" and (json_like or c + 1 == len(s) or s[c + 1] in " \t,[]{}"):
                     colon_end = starts[i] + c + 1
                     c += 1
@@ -1890,7 +2014,7 @@ class _Parser:
                         i, c = fws(i, c)
                         s = lines[i]
                     if s[c] in ",}":
-                        value: Node = self._empty(colon_end, None, None, lvl, i, c)
+                        value = self._empty(colon_end, lvl, i, c)
                     else:
                         value = fnode(i, c, lvl)
                         i = self.i
@@ -1900,7 +2024,7 @@ class _Parser:
                             i, c = fws(i, c)
                             s = lines[i]
                 else:
-                    value = self._empty(key.end, None, None, lvl, i, c)
+                    value = self._empty(key.end, lvl, i, c)
                 if key.style == PLAIN and key.raw == "<<":
                     merge = True
                 pairs.append((key, value))
@@ -1913,7 +2037,7 @@ class _Parser:
                     self._fail("expected ',' or '}' in a flow mapping", i, c)
             if merge:
                 pairs = self._merge(pairs)
-            node = MapNode(pairs, tag, anchor, start, starts[i] + c + 1, self.src)
+            node = MapNode(pairs, start, starts[i] + c + 1, src, tag=tag, anchor=anchor)
         self.i = i
         self.c = c + 1
         if anchor is not None:
@@ -1924,21 +2048,20 @@ class _Parser:
         """``[a: b]``: a single-pair mapping inside a flow sequence; (i, c) is at the ':'."""
         key = self._as_key(knode)
         lvl = self._open(depth, i, c)
-        lines = self.lines
         colon_end = self.starts[i] + c + 1
         i, c = self._fws(i, c + 1)
-        s = lines[i]
-        if s[c] in ",]":
-            value: Node = self._empty(colon_end, None, None, lvl, i, c)
+        value: Node
+        if self.lines[i][c] in ",]":
+            value = self._empty(colon_end, lvl, i, c)
         else:
-            value = self._fnode(i, c, lvl)
+            value = self.fnode(i, c, lvl)
             i, c = self._fws(self.i, self.c)
         items = [(key, value)]
         if key.is_merge:
             items = self._merge(items)
         self.i = i
         self.c = c
-        return MapNode(items, None, None, key.start, max(value.end, colon_end), self.src)
+        return MapNode(items, key.start, max(value.end, colon_end), self.src)
 
     def _fnode(self, i: int, c: int, depth: int) -> Node:
         """A node inside a flow collection at (i, c); leaves (self.i, self.c) right after it."""
@@ -1956,19 +2079,19 @@ class _Parser:
                 self.i = i
                 self.c = e
                 base = self.starts[i]
-                return ScalarNode(raw, DOUBLE, None, None, base + c, base + e, self.src)
+                return ScalarNode(raw, DOUBLE, base + c, base + e, self.src)
         elif ch not in "&!*[{'|>?":
             m = self.plain_f(s, c)
             if m is not None:
                 e = m.end()
-                if e < len(s) and s[e] != " " and s[e] != "\t":  # fast path: cannot continue
+                if e < len(s) and s[e] not in " \t":  # fast path: cannot continue on the next line
                     self.count += 1
                     if self.count > MAX_NODES:
                         self._fail(_NODES_MSG, i, c)
                     self.i = i
                     self.c = e
                     base = self.starts[i]
-                    return ScalarNode(s[c:e], PLAIN, None, None, base + c, base + e, self.src)
+                    return ScalarNode(s[c:e], PLAIN, base + c, base + e, self.src)
         return self._fnode_slow(i, c, depth)
 
     def _fnode_slow(self, i: int, c: int, depth: int) -> Node:
@@ -1976,7 +2099,7 @@ class _Parser:
         ch = s[c]
         anchor: str | None = None
         tag: str | None = None
-        if ch == "&" or ch == "!":
+        if ch in "&!":
             anchor, tag, pend, c2 = self._props(i, c, True)
             pend_off = self.starts[i] + pend
             i, c = self._fws(i, c2)
@@ -1985,24 +2108,24 @@ class _Parser:
             if ch in ",]}" or (ch == ":" and (c + 1 == len(s) or s[c + 1] in " \t,[]{}")):
                 self.i = i
                 self.c = c
-                return self._empty(pend_off, anchor, tag, depth, i, c)
+                return self._empty(pend_off, depth, i, c, anchor=anchor, tag=tag)
         if ch == "*":
             if anchor is not None or tag is not None:
                 self._fail("an alias cannot have properties", i, c)
             return self._alias(i, c, depth)
         if ch == "[" or (ch == "{" and not (self.helm and s.startswith("{{", c))):
             return self._flow(i, c, depth, anchor, tag)
+        if ch in "|>":
+            self._fail("block scalars are not allowed inside flow collections", i, c)
+        if ch == "?":
+            self._fail("complex mapping keys ('?') are not supported", i, c)
         if anchor is not None:
             n0, d0 = self._anchor_begin(depth)
         base = self.starts[i]
-        if ch == '"' or ch == "'":
+        if ch in "\"'":
             raw = self._dquoted(i, c) if ch == '"' else self._squoted(i, c)
             style = DOUBLE if ch == '"' else SINGLE
             end = self.starts[self.i] + self.c
-        elif ch in "|>":
-            self._fail("block scalars are not allowed inside flow collections", i, c)
-        elif ch == "?":
-            self._fail("complex mapping keys ('?') are not supported", i, c)
         else:
             m = self.plain_f(s, c)
             if m is None:
@@ -2010,16 +2133,17 @@ class _Parser:
             raw, end = self._plain_flow(i, c, m.end())
             style = PLAIN
         self._bump(i, c)
-        node = ScalarNode(raw, style, tag, anchor, base + c, end, self.src)
+        node = ScalarNode(raw, style, base + c, end, self.src, tag=tag, anchor=anchor)
         if anchor is not None:
             self._anchor_end(anchor, node, n0, d0, depth)
         return node
 
     def _plain_flow(self, i: int, c: int, e: int) -> tuple[str, int]:
+        """A flow plain scalar ending at (i, e) on its first line, plus any continuation lines."""
         lines = self.lines
         s = lines[i]
         base = self.starts[i]
-        if _WS.match(s, e).end() < len(s):
+        if _skip_ws(s, e) < len(s):
             self.i = i
             self.c = e
             return s[c:e], base + e
@@ -2039,7 +2163,7 @@ class _Parser:
                 continue
             if t[k] == "#":
                 break
-            e2 = cont(t, k).end()
+            e2 = _end(cont(t, k), k)
             if e2 == k:
                 break
             if chunks is None:
@@ -2048,7 +2172,7 @@ class _Parser:
             chunks.append(t[k:e2])
             empties = 0
             end_i, end_e = j, e2
-            if _WS.match(t, e2).end() < len(t):
+            if _skip_ws(t, e2) < len(t):
                 break
             j += 1
         self.i = end_i
@@ -2066,7 +2190,7 @@ def load_all(
     """Parse a YAML (or JSON) stream into documents.
 
     A syntax or limit error affects only its own document: that ``Document`` has ``root=None`` and
-    ``error`` set, and parsing resumes at the next ``---``/``...``/``%`` line. With ``strict=True`` the
+    ``error`` set, and parsing resumes at the next ``---``/``...`` line. With ``strict=True`` the
     first error is raised instead. ``schema`` (``yaml12`` or ``yaml11``) is the default for
     ``ScalarNode.value``; ``lenient_helm`` enables the Helm template leniency of spec §8.6.
     """
@@ -2079,7 +2203,7 @@ def load_all(
         err = YamlError(f"YAML text larger than {MAX_BYTES} bytes", 1, 1, 0)
         if strict:
             raise err
-        return [Document(None, err, 0, 0, len(text), False, False, None, src)]
+        return [Document(None, err, 0, 0, len(text), src=src)]
     if not text:
         return []
     # Node graphs are acyclic, so pausing the cyclic collector during a large parse is safe; it

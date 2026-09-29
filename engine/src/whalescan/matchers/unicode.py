@@ -86,8 +86,9 @@ _KEYCAP_BASE: Final = "[0-9#*]"
 
 # Validators run right after the candidate character was consumed; each accepts it only when no
 # exemption applies. Lookbehinds therefore end with the character itself.
+# ZWJ: emoji before it (optionally followed by VS16 or a skin tone) and an emoji after it.
 _ZWJ_OK: Final = (
-    rf"(?<={_ZWJ})(?!(?:(?<={_EP}{_ZWJ})|(?<={_EP}{_VS16}{_ZWJ})|(?<={_EP}{_SKIN}{_ZWJ})){_EP})"
+    rf"(?<={_ZWJ})(?!(?:(?<={_EP}{_ZWJ})|(?<=[{_VS16}{_SKIN[1:-1]}]{_ZWJ})(?<={_EP}.{_ZWJ})){_EP})"
 )
 _ZWNJ_OK: Final = rf"(?<={_ZWNJ})(?!(?<={_ARABIC}{_ZWNJ}){_ARABIC})(?!(?<={_INDIC}{_ZWNJ}){_INDIC})"
 _BOM_OK: Final = rf"(?<={_BOM})(?<!^{_BOM})"
@@ -162,6 +163,7 @@ def _class_regex(kind: str, min_run: int) -> re.Pattern[str]:
 
 class _HomoglyphRes(NamedTuple):
     conf: re.Pattern[str]         # any confusable
+    transition: re.Pattern[str]   # an ASCII letter/digit next to a non-ASCII letter/digit
     mixed: re.Pattern[str]        # a word with >= 1 ASCII letter and >= 1 confusable
     all_conf: re.Pattern[str]     # a word of >= 2 chars made only of confusables and ASCII digits
     other_alnum: re.Pattern[str]  # a non-ASCII letter/digit that is not a confusable
@@ -171,8 +173,11 @@ class _HomoglyphRes(NamedTuple):
 def _homoglyph_res() -> _HomoglyphRes:
     # Word-start anchored and lookahead-checked, so every word is scanned a bounded number of times.
     word_start = f"(?<!{_W}{_W})"
+    non_ascii = r"[^\W_\x00-\x7f]"
     return _HomoglyphRes(
         conf=re.compile(_CONF),
+        # Every mixed word holds such a transition, and natural text has few: they gate `mixed`.
+        transition=re.compile(rf"[A-Za-z0-9](?:(?={non_ascii})|(?<={non_ascii}[A-Za-z0-9]))"),
         mixed=re.compile(
             rf"{_W}{word_start}(?:(?<=[A-Za-z])|(?={_W}*?[A-Za-z]))(?:(?<={_CONF})|(?={_W}*?{_CONF})){_W}*"
         ),
@@ -180,7 +185,7 @@ def _homoglyph_res() -> _HomoglyphRes:
             rf"[0-9{_CONF_BODY}](?<!{_W}[0-9{_CONF_BODY}])(?:(?<={_CONF})|(?=[0-9]*{_CONF}))"
             rf"[0-9{_CONF_BODY}]+(?!{_W})"
         ),
-        other_alnum=re.compile(rf"[^\W_\x00-\x7f](?<!{_CONF})"),
+        other_alnum=re.compile(rf"{non_ascii}(?<!{_CONF})"),
     )
 
 
@@ -318,19 +323,9 @@ def _reveal_homoglyphs(text: str) -> str:
     res = _homoglyph_res()
     if res.conf.search(text) is None:
         return text
-    spans = [m.span() for m in res.mixed.finditer(text)]
-    line_starts: list[int] | None = None
-    verdicts: dict[int, bool] = {}
-    for m in res.all_conf.finditer(text):
-        if line_starts is None:
-            line_starts = _line_starts(text)
-        i = bisect_right(line_starts, m.start()) - 1
-        ok = verdicts.get(i)
-        if ok is None:
-            end = line_starts[i + 1] - 1 if i + 1 < len(line_starts) else len(text)
-            ok = verdicts[i] = res.other_alnum.search(text, line_starts[i], end) is None
-        if ok:
-            spans.append(m.span())
+    starts = _line_starts(text)
+    spans = [m.span() for m in _mixed_word_spans(text, starts)]
+    spans += [m.span() for m in _all_confusable_word_spans(text, starts, {})]
     if not spans:
         return text
     spans.sort()
@@ -412,16 +407,6 @@ def _bidi_unbalanced(ctx: FileCtx, line: int) -> bool:
     return got
 
 
-def _otherwise_ascii(ctx: FileCtx, line: int) -> bool:
-    """Every non-ASCII letter or digit on `line` is a confusable."""
-    cache = _cache(ctx, _ASCII_LINE_CACHE)
-    got = cache.get(line)
-    if got is None:
-        s, e = ctx.line_span(line)
-        got = cache[line] = _homoglyph_res().other_alnum.search(ctx.text, s, e) is None
-    return got
-
-
 def _scan_runs(ctx: FileCtx, classes: frozenset[str], opt: _Options) -> Iterator[_Cand]:
     rx = _run_regex(classes, opt.allow_emoji, opt.min_run)
     tables = _tables()
@@ -466,33 +451,60 @@ def _homoglyph_cand(word: str, start: int, end: int, count: int, delta: int) -> 
     return _Cand(start, end, {"classes": ["HOMOGLYPH"], "count": count, "skeleton": skeleton}, delta)
 
 
-def _scan_mixed_words(ctx: FileCtx, min_run: int) -> Iterator[_Cand]:
+def _mixed_word_spans(text: str, starts: list[int]) -> Iterator[re.Match[str]]:
+    """Mixed-script words, searched only on lines that hold an ASCII/non-ASCII transition."""
     res = _homoglyph_res()
-    for m in res.mixed.finditer(ctx.text):
+    pos, size = 0, len(text)
+    while pos < size:
+        t = res.transition.search(text, pos)
+        if t is None:
+            return
+        i = bisect_right(starts, t.start()) - 1
+        end = starts[i + 1] - 1 if i + 1 < len(starts) else size
+        yield from res.mixed.finditer(text, starts[i], end)  # words never cross a line
+        pos = end + 1
+
+
+def _scan_mixed_words(ctx: FileCtx, min_run: int) -> Iterator[_Cand]:
+    conf = _homoglyph_res().conf
+    for m in _mixed_word_spans(ctx.text, ctx.line_starts):
         word = m.group()
-        n = len(res.conf.findall(word))
+        n = len(conf.findall(word))
         if n >= min_run:
             yield _homoglyph_cand(word, m.start(), m.end(), n, 0)
 
 
-def _scan_all_confusable_words(ctx: FileCtx, min_run: int) -> Iterator[_Cand]:
+def _all_confusable_word_spans(
+    text: str, starts: list[int], verdicts: dict[int, bool]
+) -> Iterator[re.Match[str]]:
+    """All-confusable words on lines whose other non-ASCII letters and digits are confusables too.
+
+    `verdicts` caches that per-line check (keyed by 0-based line index)."""
     res = _homoglyph_res()
-    text = ctx.text
     pos, size = 0, len(text)
     while pos < size:
         m = res.all_conf.search(text, pos)
         if m is None:
             return
-        s, e = m.span()
-        line = ctx.line_of(s)
-        if not _otherwise_ascii(ctx, line):
-            pos = ctx.line_span(line)[1] + 1  # nothing else on this line can qualify
+        i = bisect_right(starts, m.start()) - 1
+        end = starts[i + 1] - 1 if i + 1 < len(starts) else size
+        ok = verdicts.get(i)
+        if ok is None:
+            ok = verdicts[i] = res.other_alnum.search(text, starts[i], end) is None
+        if not ok:
+            pos = end + 1  # nothing else on this line can qualify
             continue
-        pos = e
+        pos = m.end()
+        yield m
+
+
+def _scan_all_confusable_words(ctx: FileCtx, min_run: int) -> Iterator[_Cand]:
+    conf = _homoglyph_res().conf
+    for m in _all_confusable_word_spans(ctx.text, ctx.line_starts, _cache(ctx, _ASCII_LINE_CACHE)):
         word = m.group()
-        n = len(res.conf.findall(word))
+        n = len(conf.findall(word))
         if n >= min_run:
-            yield _homoglyph_cand(word, s, e, n, -1)
+            yield _homoglyph_cand(word, m.start(), m.end(), n, -1)
 
 
 def _scan_homoglyphs(ctx: FileCtx, min_run: int) -> Iterator[_Cand]:
