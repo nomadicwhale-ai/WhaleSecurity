@@ -11,7 +11,7 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
   - [docs/specs/rules-appsec-secrets.md](docs/specs/rules-appsec-secrets.md): appsec + secrets rule catalog.
   - [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): k8s, Docker, Terraform, CI/CD, proxies, FastAPI, Airflow, Spark, LLM and trading rule catalog.
   - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): tests, evals, CI and release.
-- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,897 unit tests passing**, ruff clean.
+- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,921 unit tests passing**, ruff clean.
   - Contract: `model.py`, `errors.py`, `matchers/base.py`. Base provides combinators `all`, `any`, `not` and `near_lines`.
   - Config: `config.py` with discovery, precedence, the trust boundary for untrusted project config, and validation. It vendors `_vendor/tomli` for Python 3.10.
   - File handling:
@@ -54,7 +54,7 @@ cd engine && ruff check src tests && mypy src && pytest -q
   - `suppress.py`: inline markers with a required reason and `until=`; the baseline file with create, update and prune; hard exclusions for `inject` and `WS-AGT` in agent-config and doc files.
   - `redact.py`: redaction formats by length, keeping the PEM header, a sweep of known secrets, then reveal.
   - `log.py`: logging with a redacting filter.
-- [ ] **P0-2 Reporters** (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Validate the output against the schemas in tests. This also clears the mypy errors in `model.py`.
+- [x] **P0-2 Reporters** (done: text, json/jsonl, sarif, markdown, 4 JSON schemas, 24 tests; SARIF validated against the official schema) (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Validate the output against the schemas in tests. This also clears the mypy errors in `model.py`.
 - [ ] **P0-3 API** (spec §16): `api.py` with a `Scanner` that runs walker → classify → applicability index → keyword prefilter → `evaluate` → filters → findings → dedupe → suppress → sort. Also module-level cached `scan_text` and `scan_injection` for hooks. Add a process pool above 200 files (§15.3) and the time budget (§15.4).
 - [ ] **P0-4 CLI** (spec §2, §17):
   - Commands: `scan`, `inject`, `secrets`, `baseline create/update`, `rules list/test/explain` (including `--redos`) and `version`.

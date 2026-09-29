@@ -7,7 +7,7 @@ Open-source security and prompt-injection scanning for AI coding agents.
 
 It is built on a deterministic, tested engine (`whalescan`). Claude Code skills, agents and **hooks** use it to enforce rules instead of only describing them.
 
-> **Status:** engine core in progress (1,897 unit tests passing). See [TODO.md](TODO.md) for what's done and what's next.
+> **Status:** engine core in progress (1,921 unit tests passing). See [TODO.md](TODO.md) for what's done and what's next.
 
 ## Documentation
 - [docs/DESIGN.md](docs/DESIGN.md): architecture and roadmap

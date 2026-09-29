@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whalescan:schema:baseline:1",
+  "title": "whalescan baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "whalescan/baseline@1"
+    },
+    "tool_version": {
+      "type": "string"
+    },
+    "rules_hash": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fingerprint",
+          "rule_id",
+          "path",
+          "reason"
+        ],
+        "properties": {
+          "fingerprint": {
+            "$ref": "#/$defs/sha"
+          },
+          "content_fingerprint": {
+            "$ref": "#/$defs/sha"
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "added_at": {
+            "type": "string"
+          },
+          "expires": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
