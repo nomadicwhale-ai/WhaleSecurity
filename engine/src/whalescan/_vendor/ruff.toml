@@ -1,0 +1,3 @@
+# Vendored code is kept byte-identical to upstream; do not lint it.
+[lint]
+select = []
