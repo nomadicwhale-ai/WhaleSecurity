@@ -4,8 +4,8 @@
 > **AgentSec** protects the *agent* from prompt injection in the content it reads.
 > Both run on one deterministic, tested engine, and hooks enforce the rules instead of prose.
 
-We wrote this from scratch. BridgeSecurity and BridgeWard were used only as a gap analysis
-(see [REVIEW-bridge-repos.md](REVIEW-bridge-repos.md)).
+An original design, built from first principles: every detection is backed by tests, the rules
+are enforced by hooks instead of described in prose, and every output format is machine-readable.
 
 ---
 
@@ -113,7 +113,7 @@ WhaleSecurity/
 │   ├── fixtures/<RULE-ID>/{pos.*,neg.*}
 │   ├── test_rules.py            auto-parametrized: every rule × {pos must hit, neg must not}
 │   ├── test_redos.py            every regex vs 100 KB pathological input < 50 ms
-│   ├── test_regressions.py      the Bridge defects (leading-dash pattern, ZWSP, tag chars, multi-hit, multiline `on:`)
+│   ├── test_regressions.py      scanner pitfalls (dash-leading patterns, ZWSP/tag chars, multi-hit per file, multiline YAML keys)
 │   └── test_hooks.py            feed hook JSON on stdin, assert decision
 ├── evals/
 │   ├── corpus/                  vulnerable apps + clean popular repos (pinned SHAs, fetched by script)
@@ -123,7 +123,7 @@ WhaleSecurity/
 ├── action.yml                   composite GitHub Action (SARIF upload)
 ├── .pre-commit-hooks.yaml
 ├── .github/workflows/ci.yml     lint · typecheck · tests · self-scan · eval smoke (actions pinned by SHA)
-├── docs/                        DESIGN.md  REVIEW-bridge-repos.md  RULES.md  HOOKS.md
+├── docs/                        DESIGN.md  ROADMAP.md  specs/
 ├── README.md  LICENSE  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md
 ```
 
@@ -276,7 +276,7 @@ allow/deny overrides. Hooks read it once and cache it.
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **P0 — Foundations** (week 1) | Repo skeleton, rule schema and loader, walker, regex/multiline/unicode/entropy matchers, text/JSON output, 40 core rules with fixtures, regression tests for the Bridge defects, CI | `pytest` green; ZWSP, TAG and private-key fixtures detected; multi-hit and multiline `on:` detected |
+| **P0 — Foundations** (week 1) | Repo skeleton, rule schema and loader, walker, regex/multiline/unicode/entropy matchers, text/JSON output, 40 core rules with fixtures, scanner-pitfall regression tests, CI | `pytest` green; ZWSP, TAG and private-key fixtures detected; multi-hit and multiline `on:` detected |
 | **P1 — Plugin & CI surface** (week 2) | Skills (appsec, agentsec, audit, inject-audit), 3 agents, SARIF/Markdown reports, baseline and suppressions, `action.yml`, pre-commit, `plugin.json` and marketplace | `/whale-audit` produces a verified report on the sample vulnerable app; SARIF shows in GitHub code scanning |
 | **P2 — Enforcement** (week 3) | All five hooks, `.whalesecurity/config.toml`, auditor-mode Bash allowlist | Hook tests green; manual red-team: poisoned web page, poisoned CLAUDE.md, `curl\|sh` README, and `.env` read are all stopped or labeled |
 | **P3 — Depth** (week 4) | yaml-path and py-ast matchers; domain packs (FastAPI, Airflow/Spark, k8s, Terraform, GHA/Tekton/Flux, LLM/RAG, trading); `mcp pin/verify`; adapters | Around 150 rules; domain fixtures pass; rug-pull demo detected |

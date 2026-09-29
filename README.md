@@ -7,5 +7,4 @@ Open-source security and prompt-injection scanning for AI coding agents.
 
 It is built on a deterministic, tested engine (`whalescan`). Claude Code skills, agents and **hooks** use it to enforce rules instead of only describing them.
 
-> Status: design phase. See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and roadmap, and
-> [docs/REVIEW-bridge-repos.md](docs/REVIEW-bridge-repos.md) for the prior-art review that shaped it.
+> Status: design phase. See [docs/DESIGN.md](docs/DESIGN.md) for the architecture and roadmap.
