@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whalescan:schema:report:1",
+  "title": "whalescan report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "tool",
+    "run",
+    "stats",
+    "findings",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema": {
+      "const": "whalescan/report@1"
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "rules_hash"
+      ],
+      "properties": {
+        "name": {
+          "const": "whalescan"
+        },
+        "version": {
+          "type": "string"
+        },
+        "rules_hash": {
+          "type": "string"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "started_at",
+        "duration_ms",
+        "root",
+        "argv",
+        "packs",
+        "fail_on",
+        "exit_code",
+        "truncated",
+        "error"
+      ],
+      "properties": {
+        "started_at": {
+          "type": "string"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "root": {
+          "type": "string"
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "packs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "config_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "config_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fail_on": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "message"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": [
+        "files_scanned",
+        "files_skipped",
+        "rules_evaluated",
+        "capped",
+        "by_severity",
+        "suppressed"
+      ],
+      "properties": {
+        "files_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_skipped": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "bytes_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rules_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capped": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "by_severity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "suppressed": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:whalescan:schema:finding:1"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "level",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "level": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "rule_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

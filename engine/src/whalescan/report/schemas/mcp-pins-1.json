@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whalescan:schema:mcp-pins:1",
+  "title": "whalescan MCP pins",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "servers"
+  ],
+  "properties": {
+    "schema": {
+      "const": "whalescan/mcp-pins@1"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "servers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "config_sha256",
+          "tools"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "config_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "pinned_at": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": [
+                "sha256"
+              ],
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "description_chars": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

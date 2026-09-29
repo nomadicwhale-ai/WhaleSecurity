@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whalescan:schema:finding:1",
+  "title": "whalescan finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "rule_id",
+    "title",
+    "severity",
+    "base_severity",
+    "score",
+    "confidence",
+    "reachability",
+    "exposure",
+    "file",
+    "line",
+    "col",
+    "end_line",
+    "end_col",
+    "snippet",
+    "cwe",
+    "owasp",
+    "message",
+    "fingerprint",
+    "content_fingerprint",
+    "source"
+  ],
+  "properties": {
+    "schema": {
+      "const": "whalescan/finding@1"
+    },
+    "rule_id": {
+      "type": "string",
+      "pattern": "^(WS-[A-Z0-9]+(-[A-Z0-9]+)*-[0-9]{3}|(semgrep|gitleaks|trivy|osv|llm):\\S{1,200})$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "severity": {
+      "$ref": "#/$defs/severity"
+    },
+    "base_severity": {
+      "$ref": "#/$defs/severity"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "confidence": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "reachability": {
+      "enum": [
+        "tainted",
+        "unknown",
+        "constant"
+      ]
+    },
+    "exposure": {
+      "enum": [
+        "internet",
+        "default",
+        "internal",
+        "vendored",
+        "test"
+      ]
+    },
+    "pack": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1
+    },
+    "file_kind": {
+      "enum": [
+        "code",
+        "iac",
+        "ci",
+        "agent-config",
+        "doc",
+        "data"
+      ]
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "col": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "end_col": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "exclusive, code points"
+    },
+    "snippet": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "redacted and revealed"
+    },
+    "cwe": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^CWE-[0-9]+$"
+      }
+    },
+    "owasp": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "atlas": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fix": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fingerprint": {
+      "$ref": "#/$defs/sha"
+    },
+    "content_fingerprint": {
+      "$ref": "#/$defs/sha"
+    },
+    "source": {
+      "enum": [
+        "engine",
+        "semgrep",
+        "gitleaks",
+        "trivy",
+        "osv",
+        "llm"
+      ]
+    },
+    "also_reported_by": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "suppressed": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "inline",
+                "baseline",
+                "config"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "until": {
+              "type": "string",
+              "format": "date"
+            },
+            "ticket": {
+              "type": "string"
+            },
+            "marker_line": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "by"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "confirmed",
+            "false_positive",
+            "needs_review"
+          ]
+        },
+        "by": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "properties": {
+        "trace": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": [
+              "line"
+            ],
+            "properties": {
+              "line": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "via": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "source_label": {
+          "type": "string"
+        },
+        "decoded": {
+          "type": "string"
+        },
+        "decoded_bytes_hex": {
+          "type": "string"
+        },
+        "bidi_unbalanced": {
+          "type": "boolean"
+        },
+        "entropy": {
+          "type": "number"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "unresolved": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "related": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ]
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
