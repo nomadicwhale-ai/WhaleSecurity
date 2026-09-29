@@ -11,7 +11,7 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
   - [docs/specs/rules-appsec-secrets.md](docs/specs/rules-appsec-secrets.md): appsec + secrets rule catalog.
   - [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): k8s, Docker, Terraform, CI/CD, proxies, FastAPI, Airflow, Spark, LLM and trading rule catalog.
   - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): tests, evals, CI and release.
-- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,826 unit tests passing**, ruff clean.
+- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,897 unit tests passing**, ruff clean.
   - Contract: `model.py`, `errors.py`, `matchers/base.py`. Base provides combinators `all`, `any`, `not` and `near_lines`.
   - Config: `config.py` with discovery, precedence, the trust boundary for untrusted project config, and validation. It vendors `_vendor/tomli` for Python 3.10.
   - File handling:
@@ -48,7 +48,7 @@ cd engine && ruff check src tests && mypy src && pytest -q
 ## Next TODOs (in order)
 
 ### P0: finish the engine core (target v0.1)
-- [ ] **P0-1 Pipeline modules** (spec §9, §10, §11, §13, §18):
+- [x] **P0-1 Pipeline modules** (done: `severity.py`, `dedupe.py`, `suppress.py`, `redact.py`, `log.py`, 71 tests) (spec §9, §10, §11, §13, §18):
   - `severity.py`: BASE × reachability × exposure, bands, ordering.
   - `dedupe.py`: normalized snippet, `fingerprint` and `content_fingerprint`, occurrence index, the 4-step dedupe.
   - `suppress.py`: inline markers with a required reason and `until=`; the baseline file with create, update and prune; hard exclusions for `inject` and `WS-AGT` in agent-config and doc files.

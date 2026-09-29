@@ -1,4 +1,4 @@
-# ruff: noqa: E501 - the embedded corpus reproduces real-world files, long lines included
+
 """Differential tests: whalescan.yamlite against PyYAML (a dev-only dependency).
 
 PyYAML is the reference for structure, scalar text, styles and positions. Reference loaders keep
