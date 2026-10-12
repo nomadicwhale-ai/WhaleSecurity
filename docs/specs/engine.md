@@ -393,6 +393,13 @@ its roots, since redaction is the second line of defense, not the first.
 
 Files are opened with `O_RDONLY | O_NOFOLLOW` where available and read in one call capped at `max_file_bytes + 1`.
 
+**Parser safety limits.** Extra rule sources (YAML or JSON) share the 2 MiB cap even when supplied as bytes;
+config and ignore readers retain their 1 MiB safety caps and reject special files without blocking. Ignore files
+use at most 20,000 patterns of 4,096 characters each. No separate line-length cutoff discards content: the file
+byte cap also bounds a single line. Explicit/user config symlinks are resolved before the regular-file check.
+The deterministic Hypothesis campaign in `engine/tests/security/` covers malformed input, safe-subset PyYAML
+agreement, and these boundaries; killable subprocess tests enforce no-hang budgets for adversarial inputs.
+
 ### 5.4 Binary detection
 `BINARY_EXT`: images (`.png .jpg .jpeg .gif .webp .ico`), `.pdf`, archives (`.zip .gz .tgz .bz2 .xz .zst .7z .jar
 .war .whl`), native and bytecode (`.class .so .dylib .dll .exe .o .a .pyc`), data and models (`.parquet .orc .avro
@@ -727,7 +734,12 @@ semantics" has two halves: patterns never pass through argv, so a leading `-` is
 | R4 | Minimum width > 0 (`parse(p).getwidth()[0] > 0`) | error |
 | R5 | No `(?s)`/DOTALL in `regex` (use `multiline`) | error |
 | R6 | Unbounded `*`/`+` on `.` or a negated class anywhere should be `{0,N}`, N ≤ 4096 | warning |
-| R7 | No alternation inside an unbounded repeat whose branches share a first character | error |
+| R7 | No ambiguous alternation inside an unbounded repeat, including factored empty branches, nullable bodies and variable bounded repeats that overlap their continuation | error |
+
+R7 respects Unicode case-insensitive matching and category/range intersections; analysis that cannot prove
+branches disjoint within its work budget fails closed. Config `secrets.allow_values` uses the same compilation
+and repeat-ambiguity guards, but permits empty matches, DOTALL and leading wide repeats because it uses
+`fullmatch`, not `finditer`. Safety comes from these guards and adversarial testing, not a per-match timeout.
 
 ### 8.3 `multiline`
 **`pattern` form:** `finditer` over the whole text with `re.M` (plus `re.S` if flag `s`); a hit is dropped if

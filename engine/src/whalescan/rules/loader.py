@@ -339,6 +339,8 @@ def read_source(src: SourceFile, limit: int = MAX_RULE_FILE_BYTES) -> bytes:
 
 def parse_source(src: SourceFile, data: bytes, *, yaml_loader: YamlLoader | None = None) -> list[RawRule]:
     """Decode and parse one source into raw rule objects (no validation yet)."""
+    if src.origin != "bundle" and len(data) > MAX_RULE_FILE_BYTES:
+        raise RuleError(f"{src.display}: rule file is larger than {MAX_RULE_FILE_BYTES} bytes")
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -404,11 +406,12 @@ def default_yaml_loader(text: str) -> list[Any]:
         raise RuleError(f"YAML rule packs need whalescan.yamlite, which is unavailable: {exc}") from None
     try:
         docs = yamlite.load_all(text)
+        # Non-strict yamlite stores errors on Document; conversion raises them, not load_all.
+        return [to_plain(d) for d in docs]
     except RuleError:
         raise
     except Exception as exc:  # parser errors of any type become rule errors, never crashes
         raise RuleError(f"YAML parse error: {exc}") from None
-    return [to_plain(d) for d in docs]
 
 
 def to_plain(value: Any, depth: int = 0) -> Any:
@@ -459,7 +462,21 @@ def _json_load(text: str, where: str) -> Any:
         raise ValueError(f"invalid JSON constant {name}")
 
     try:
-        return json.loads(text, object_pairs_hook=pairs, parse_constant=bad_constant)
+        doc = json.loads(text, object_pairs_hook=pairs, parse_constant=bad_constant)
+        # json.loads accepts escaped lone surrogates, but rule hashes and reports must be
+        # valid UTF-8. Reject them at the input boundary, before deferred serialization.
+        pending = [doc]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, str):
+                if re.search(r"[\ud800-\udfff]", value):
+                    raise ValueError("unpaired Unicode surrogate")
+            elif isinstance(value, dict):
+                pending.extend(value.keys())
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+        return doc
     except RecursionError:
         raise RuleError(f"{where}: JSON nested too deeply") from None
     except ValueError as exc:

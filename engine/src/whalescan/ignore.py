@@ -268,8 +268,9 @@ def _compile_component(seg: str) -> SegMatch:
             return lambda s: s.startswith(pre)
         need = len(pre) + len(suf)
         return lambda s: len(s) >= need and s.startswith(pre) and s.endswith(suf)
-    if stars <= 2:
-        # At most two unbounded runs: sre is O(n^2) worst case on a <= 255-char component.
+    if stars <= 1:
+        # A single star cannot split the input between competing unbounded runs. Two stars
+        # are quadratic on long virtual paths; use the greedy matcher for those too.
         parts: list[str] = []
         for t in toks:
             if t is _STAR:

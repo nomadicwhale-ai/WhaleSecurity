@@ -12,7 +12,8 @@ out of alternations).
 - R4 (error): minimum width > 0.
 - R5 (error): no DOTALL outside `multiline` patterns.
 - R6 (warning): no unbounded (or > 4096) repeat of `.` or a negated class anywhere.
-- R7 (error): no alternation inside an unbounded repeat whose branches can start with the same character.
+- R7 (error): no ambiguous alternation, nullable body, or overlapping variable bounded repeat inside an
+  unbounded repeat, including prefix alternatives factored by the stdlib parser.
 
 Every walk is bounded: patterns longer than `MAX_PATTERN_CHARS` or nested deeper than `MAX_NESTING` are
 rejected under R1 before any recursive analysis.
@@ -25,7 +26,8 @@ import re
 import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from functools import lru_cache
+from typing import Any, Final, Literal, cast
 
 Level = Literal["error", "warning"]
 Context = Literal["regex", "multiline", "sequence", "search"]
@@ -36,6 +38,7 @@ MAX_PATTERN_CHARS: Final = 16_384
 MAX_NESTING: Final = 64
 MAX_BOUND: Final = 4096
 MAX_R7_ALTERNATIVES: Final = 256
+MAX_R7_CANDIDATES: Final = 4096
 MAX_R7_WORK: Final = 2_000_000       # candidate chars x class items examined for one alternation
 
 FLAG_BITS: Final[Mapping[str, int]] = {
@@ -422,35 +425,78 @@ _REPRESENTATIVES: Final = tuple(
 
 
 def _ambiguous_alternation(tree: Any, icase: bool) -> str:
-    """Message for the first alternation inside an unbounded repeat whose branches share a first character."""
-    # (sequence, ignorecase, inside an unbounded repeat)
-    stack: list[tuple[Any, bool, bool]] = [(tree, icase, False)]
+    """Check repeat ambiguity on the rewritten AST, including empty factored branches.
+
+    Carry the first characters after each sub-sequence, wrapping to the start of its enclosing
+    unbounded repeat. For ``(?:a|aa)+`` the parser emits ``a(?:|a)``: the empty branch competes
+    with the next iteration's ``a``, which an ordinary branch-first-character check misses.
+    """
+    # (sequence, ignorecase, inside an unbounded repeat, first atoms after this sequence)
+    stack: list[tuple[Any, bool, bool, list[_Atom]]] = [(tree, icase, False, [])]
     while stack:
-        seq, ic, inside = stack.pop()
-        for op, av in seq:
-            if op is _C.BRANCH and inside:
-                message = _branch_overlap(av[1], ic)
-                if message:
-                    return message
+        seq, ic, inside, after = stack.pop()
+        for index, (op, av) in enumerate(seq):
+            children = _children(op, av)
+            if not children:
+                continue
+            follows: list[_Atom] = []
+            if inside:
+                follows, nullable = _first(seq[index + 1:], ic, 0)
+                if nullable:
+                    follows += after
+                if op is _C.BRANCH:
+                    message = _branch_overlap(av[1], ic, follows)
+                    if message:
+                        return message
+                # A variable finite repeat can be just as ambiguous as a factored alternation:
+                # (a{1,2})+ is (a(?:|a))+, but (ab?)+ has disjoint b / next-iteration a.
+                if op in _REPEATS and int(av[0]) != int(av[1]) and not _unbounded(op, av):
+                    first, _ = _first(av[2], ic, 0)
+                    message = _atoms_overlap([first, follows])
+                    if message:
+                        return "variable bounded repeat inside an unbounded repeat: " + message
             if op is _C.SUBPATTERN:
                 add, remove = int(av[1]), int(av[2])
                 child_ic = (ic or bool(add & _IGNORECASE)) and not bool(remove & _IGNORECASE)
-                stack.append((av[-1], child_ic, inside))
+                stack.append((av[-1], child_ic, inside, follows))
                 continue
             child_inside = inside or _unbounded(op, av)
-            for child in _children(op, av):
-                stack.append((child, ic, child_inside))
+            if _unbounded(op, av):
+                first, nullable = _first(av[2], ic, 0)
+                if nullable:
+                    return ("unbounded repeat has a nullable body (ambiguous backtracking): "
+                            "require a character")
+                follows = first
+            for child in children:
+                stack.append((child, ic, child_inside, follows))
     return ""
 
 
-def _branch_overlap(alternatives: list[Any], icase: bool) -> str:
+def _branch_overlap(alternatives: list[Any], icase: bool, follows: list[_Atom]) -> str:
     if len(alternatives) > MAX_R7_ALTERNATIVES:
         return (f"alternation with more than {MAX_R7_ALTERNATIVES} branches inside an unbounded repeat "
                 "is too large to analyze")
-    firsts = [_first(alt, icase, 0)[0] for alt in alternatives]
+    firsts: list[list[_Atom]] = []
+    for alt in alternatives:
+        atoms, nullable = _first(alt, icase, 0)
+        firsts.append(atoms + follows if nullable else atoms)
+    return _atoms_overlap(firsts)
+
+
+def _atoms_overlap(firsts: list[list[_Atom]]) -> str:
+    """Prove disjoint first-character sets or fail closed within the analysis budget."""
     pool: set[int] = set(_REPRESENTATIVES)
+    # Endpoint sampling alone is unsound for Unicode categories: a range can contain a digit
+    # without having decimal endpoints. Enumerate small ranges, and reject costly analyses.
+    enumerate_ranges = any(
+        a[0] != "any" and (a[-1] or (a[0] == "in" and any(op is _C.CATEGORY for op, _ in a[1])))
+        for atoms in firsts for a in atoms
+    )
     for atoms in firsts:
-        pool |= _candidates(atoms)
+        candidates = _candidates(atoms, expand_ranges=enumerate_ranges)
+        if candidates is None or len(pool) + len(candidates) > MAX_R7_CANDIDATES:
+            return "alternation inside an unbounded repeat is too complex to prove disjoint"
+        pool |= candidates
     work = len(pool) * sum(len(a[1]) if a[0] == "in" else 1 for atoms in firsts for a in atoms)
     if work > MAX_R7_WORK:
         return ("alternation inside an unbounded repeat is too complex to analyze: simplify its branches or "
@@ -491,7 +537,7 @@ def _first_node(op: Any, av: Any, icase: bool, depth: int) -> tuple[list[_Atom],
     if op is _C.ANY:
         return [("any",)], False
     if op is _C.IN:
-        return [("in", av, icase)], False
+        return [("in", tuple(av), icase)], False
     if op is _C.AT or op is _C.ASSERT or op is _C.ASSERT_NOT:
         return [], True
     if op in _REPEATS:
@@ -515,7 +561,7 @@ def _first_node(op: Any, av: Any, icase: bool, depth: int) -> tuple[list[_Atom],
     return [("any",)], op is _C.GROUPREF          # group references and anything unknown: conservative
 
 
-def _candidates(atoms: list[_Atom]) -> set[int]:
+def _candidates(atoms: list[_Atom], *, expand_ranges: bool = False) -> set[int] | None:
     out: set[int] = set()
     for atom in atoms:
         if atom[0] in ("lit", "notlit"):
@@ -527,31 +573,49 @@ def _candidates(atoms: list[_Atom]) -> set[int]:
                     out.update((av - 1, av, av + 1))
                 elif op is _C.RANGE:
                     lo, hi = int(av[0]), int(av[1])
-                    out.update((lo - 1, lo, hi, hi + 1))
+                    if expand_ranges:
+                        if hi - lo + 1 > MAX_R7_CANDIDATES:
+                            return None
+                        out.update(range(lo, hi + 1))
+                    else:
+                        out.update((lo - 1, lo, hi, hi + 1))
+                if len(out) > MAX_R7_CANDIDATES:
+                    return None
     return {c for c in out if 0 <= c <= 0x10FFFF}
 
 
-def _variants(cp: int) -> tuple[int, ...]:
-    ch = chr(cp)
-    out = {cp}
-    for v in (ch.lower(), ch.upper(), ch.casefold()):
-        if len(v) == 1:
-            out.add(ord(v))
-    return tuple(out)
+@lru_cache(maxsize=MAX_R7_ALTERNATIVES)
+def _case_atom(atom: _Atom) -> re.Pattern[str]:
+    """Delegate simple case equivalence to the same stdlib compiler used by the matcher.
+
+    Python's IGNORECASE is not str.casefold(): dotted I and ligatures (U+FB05/U+FB06),
+    among others, use extra single-code-point equivalences. These patterns match exactly one
+    character, so native membership checks cannot backtrack on attacker-controlled text.
+    Unicode semantics conservatively include ASCII-only scoped matches too.
+    """
+    try:
+        compiler = importlib.import_module("re._compiler")
+    except ImportError:  # Python 3.10
+        compiler = importlib.import_module("sre_compile")
+    op = {"lit": _C.LITERAL, "notlit": _C.NOT_LITERAL, "in": _C.IN}[atom[0]]
+    av = list(atom[1]) if atom[0] == "in" else atom[1]
+    tree = _P.SubPattern(_P.State(), [(op, av)])
+    return cast(re.Pattern[str], compiler.compile(tree, re.IGNORECASE | re.UNICODE))
 
 
 def _member(cp: int, atom: _Atom) -> bool:
     kind = atom[0]
     if kind == "any":
         return True
-    variants = _variants(cp) if atom[-1] else (cp,)
+    if atom[-1]:
+        return _case_atom(atom).fullmatch(chr(cp)) is not None
     if kind == "lit":
-        return atom[1] in variants
+        return cp == int(atom[1])
     if kind == "notlit":
-        return atom[1] not in variants
+        return cp != int(atom[1])
     items = atom[1]
     negate = bool(items) and items[0][0] is _C.NEGATE
-    hit = any(_item_match(v, op, av) for v in variants for op, av in items if op is not _C.NEGATE)
+    hit = any(_item_match(cp, op, av) for op, av in items if op is not _C.NEGATE)
     return hit != negate
 
 
