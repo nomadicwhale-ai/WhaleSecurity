@@ -1,8 +1,10 @@
 # AgentSec — Protecting the Agent from What It Reads
 
-> **Specification, not implementation status.** This is the complete v1.0 target contract. Hooks, rule packs,
-> normalization extensions and eval harnesses described here remain planned until their roadmap exit criteria pass;
-> see [DESIGN.md §10](../DESIGN.md#10-roadmap) and [TODO.md](../../TODO.md).
+> **Specification, not implementation status; dated 2026-10-12.** All 41 WS-AGT IDs remain in the bounded
+> v1.0 core; P0-5 seeds are in progress, not a delivered full pack. Hooks and normalization extensions remain planned.
+> E0 begins evals immediately after the first detecting v0.1 release; later milestones extend the corpus and preserve
+> its baseline. [ROADMAP.md](../ROADMAP.md) owns scope/status and unchanged release gates;
+> [DESIGN §10](../DESIGN.md#10-roadmap) summarizes them and [TODO.md](../../TODO.md) lists next actions.
 
 AgentSec is the WhaleSecurity shield that protects the AI coding agent itself, a Claude Code session, from
 prompt injection and related attacks carried by the content the agent reads: web pages, search results, MCP tool

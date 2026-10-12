@@ -7,7 +7,8 @@
 The v1.0 target is built from first principles: every detection must be backed by tests, hooks
 must enforce rules instead of only describing them, and every output format must be machine-readable.
 This is a design contract, not a claim that the plugin or all rules already ship; §10 records delivery status.
-The detailed [specs](specs/) define refinements and release gates.
+Last updated: **2026-10-12**. [ROADMAP.md](ROADMAP.md) owns delivery scope, dependencies and acceptance criteria;
+the detailed [specs](specs/) define engine/rule semantics and unchanged per-pack quality gates.
 
 ---
 
@@ -17,17 +18,20 @@ The detailed [specs](specs/) define refinements and release gates.
 - G1 — A **deterministic scanner** (`whalescan`) with rules stored as data. Every rule has a positive and a negative fixture, and CI proves each rule fires.
 - G2 — A **Claude Code plugin** with discipline skills, audit slash-commands, read-only auditor agents, and **hooks** that actually block or warn.
 - G3 — **Machine-first output:** text, JSON, SARIF 2.1.0 and Markdown. Also baselines, inline suppressions that require a reason, and severity-gated exit codes.
-- G4 — **Domain packs** for the stack we run: Python/FastAPI, Airflow/Spark, k8s/Helm/operators, Terraform/Terragrunt, GHA/Tekton/FluxCD, LLM/RAG/MCP agents, and trading systems.
+- G4 — **Core first, domain packs in v1.x:** v1.0 covers Python appsec, secrets, AgentSec and GitHub Actions; FastAPI-specific, Airflow/Spark, k8s/Helm, Docker, Terraform/HCL, proxies, Tekton/Flux/GitLab, LLM-app and trading packs follow.
 - G5 — Measured quality: per-rule precision and recall on a corpus, published on every release.
 
 **Non-goals**
-- Replacing Semgrep, CodeQL, Gitleaks or Trivy. We orchestrate them when they are installed and merge their results into our findings.
+- Replacing Semgrep, CodeQL, Gitleaks or Trivy. Optional Semgrep/Gitleaks/Trivy/OSV adapters are v1.x, not dependencies of the v1.0 core.
 - Runtime WAF or network egress control.
 - Full inter-procedural taint analysis in v1. Python AST taint is local to one function; we go deeper later.
 
 ---
 
 ## 2. Architecture
+
+**Target architecture across v1.0 and v1.x, not current delivery.** HCL/domain matchers and optional adapters
+below are deferred; [ROADMAP §2](ROADMAP.md#2-release-scope) defines the v1.0 core.
 
 ```
             ┌──────────────────────── Claude Code plugin ────────────────────────┐
@@ -70,9 +74,10 @@ never adds new findings unless it labels them `source: llm`, which keeps provena
 
 ## 3. Repository layout
 
-**Target v1 layout, not a current file inventory.** The engine foundation, Scanner API (P0-3, #3) and docs are present on `main`;
-plugin, pack, repository-level test, eval and CI paths below are planned. Existing unit tests live in
-`engine/tests/unit/`. `docs/ROADMAP.md` is a planned backlog; §10 and [TODO.md](../TODO.md) track current work.
+**Target v1.0/v1.x layout, not a current file inventory.** The engine/API/CLI, CI and docs are present on `main`;
+production seed packs are in progress. Plugin, hooks, evals and remaining contract paths below are planned.
+Existing unit tests live in `engine/tests/unit/`; [ROADMAP.md](ROADMAP.md) is the detailed backlog,
+§10 is its summary and [TODO.md](../TODO.md) is the short next-actions list.
 
 ```
 WhaleSecurity/
@@ -177,24 +182,24 @@ without an auth `Depends`), and `hcl` (lite block/attribute matcher for Terrafor
 
 ---
 
-## 5. Rule packs, v1 target of 288 core rules (+14 extensions)
+## 5. Rule packs and bounded v1.0 scope
 
-| Pack | Examples | Catalog count |
+**v1.0 delivers 121 selected catalog IDs; the full 302-ID inventory is not its release denominator.**
+[ROADMAP §2.1](ROADMAP.md#21-core-count-121-catalog-ids) records the definition-row counting method and subpack totals.
+
+| Pack | v1.0 IDs | Selection / later scope |
 |---|---|---|
-| appsec | SQLi/NoSQLi, command/code injection, XSS, SSRF, traversal, deserialization, crypto, JWT/TLS, redirects, ReDoS, mass assignment | 44 |
-| secrets | Cloud, VCS, AI, payments, SaaS, DB credentials, private keys, entropy, exchange/broker keys | 37 |
-| agentsec | Override/frame forgery, hidden Unicode/rendering, exfiltration, execution lures, repo poisoning and MCP drift/supply chain | 41 |
-| k8s / docker / helm | Privilege, host namespaces/sockets, images, limits, RBAC, operator grants | 44 (4 ext) |
-| terraform / cloud | Public storage/ingress, IAM, IMDSv1, encryption, state protection | 34 (2 ext) |
-| CI/CD (GHA, Tekton, Flux, GitLab) | Untrusted execution, permissions, secrets, artifact/signature/pin checks | 31 (3 ext) |
-| proxies (NGINX, Traefik, Coolify) | TLS, traversal, CORS, dashboards, host ports | 17 (2 ext) |
-| FastAPI / Python | Auth, CORS, debug, cookies, proxy headers; generic sinks stay in appsec | 10 |
-| Airflow / Spark | DAG/shell/SQL injection, secrets, auth, Spark queries and unsafe loading | 16 (1 ext) |
-| LLM / RAG / agents | Model/tool argument sinks, prompt provenance, unsafe rendering, supply chain, bounded loops | 15 (1 ext) |
-| trading | Withdrawal scope, order idempotency/risk/kill switch, signals, money precision, live/test separation | 13 (1 ext) |
+| Python appsec | 29 | Appsec definition rows whose language includes `py`; non-Python IDs/branches defer |
+| Secrets | 37 | All credential formats, including exchange/broker keys; no trading business-logic pack |
+| AgentSec | 41 | All WS-AGT IDs, bounded views, repo/MCP protection; unsupported OCR remains visibly not scanned |
+| GitHub Actions | 14 | WS-GHA-001–016 excluding the two `† ext` entries 004/006 |
+| Domain packs / other CI/CD | 0 | k8s/Helm, Docker, Terraform/HCL, proxies, FastAPI-specific, Airflow/Spark, LLM-app, trading, Tekton/Flux/GitLab and GHA extensions: v1.x |
+| **Total** | **121** | **29 + 37 + 41 + 14** |
 
-Counts come from the three catalogs: 81 appsec/secrets + 180 domain + 41 AgentSec = 302 IDs.
-The 14 domain rules marked `ext` may defer to v1.1; all 288 core rules require fixtures before v1.0.
+Counts come from distinct concrete IDs in the three rule-definition catalogs, excluding examples/references.
+The original catalog inventory remains 81 appsec/secrets + 180 infra/domain + 41 AgentSec = 302 IDs;
+181 IDs and non-Python branches of mixed-language rules are deferred, not removed or redefined.
+Every shipped pack retains its quality bar and annotated positive/negative/guard fixtures.
 
 ---
 
@@ -230,7 +235,7 @@ audits retain engine config semantics. See [agentsec.md](specs/agentsec.md) §3,
   refusal format.
 - **`/whale-audit [path|diff|PR]`**
   1. `whalescan scan --format json` on the scope.
-  2. Optional adapters (semgrep, gitleaks, trivy) if installed.
+  2. Optional adapters (semgrep, gitleaks, trivy) if installed, from v1.x; v1.0 uses native findings.
   3. `finding-verifier` triages each finding (reachability, sanitizers, test/fixture context).
   4. `appsec-auditor` writes the final report: summary table, then only Critical/High in full
      (file:line, CWE/OWASP, verbatim code, concrete exploit, patched code), then a table of
@@ -239,9 +244,9 @@ audits retain engine config semantics. See [agentsec.md](specs/agentsec.md) §3,
   with hidden characters shown in the report (`[ZWSP]`, `[TAG:x]`, `[BIDI:RLO]`).
 - **`/whale-threat-model [design doc|PR]`**: STRIDE plus the 10-question checklist. Output is a
   table of threats, mitigations and residual risk.
-- Agents use real tool names (`Read, Grep, Glob, Bash`). The auditors' Bash use is limited by
-  `guard_bash.py` in "auditor mode": an allowlist of `git diff/log/blame`, `rg`, `find`, `wc`,
-  `xxd`, `whalescan`, `semgrep`, `gitleaks`, `trivy`.
+- Agents use real tool names (`Read, Grep, Glob, Bash`). Omit auditor Bash until the enforced allowlist ships
+  in v0.8. Thereafter `guard_bash.py` in "auditor mode" limits it to `git diff/log/blame`, `rg`, `find`, `wc`,
+  `xxd`, `whalescan`, and the optional adapter commands when those ship in v1.x.
 
 ---
 
@@ -282,43 +287,43 @@ audits retain engine config semantics. See [agentsec.md](specs/agentsec.md) §3,
 7. All GitHub Actions are pinned by SHA with workflow `permissions: {}` and per-job minimum grants.
    We use our own rules against ourselves.
 
-**Release metrics are gates, not achieved results.** §10 defines their denominators; quality-and-release §5 owns
-the full contract, including throughput ≥2k files/s single-core regex tier and hook p95 <200 ms.
+**Release metrics are gates, not achieved results.** [ROADMAP §2/§3](ROADMAP.md#2-release-scope) defines their
+shipped-scope denominators; quality-and-release §5 owns the full contract, including throughput ≥2k files/s
+single-core regex tier and hook p95 <200 ms. Current versus remaining CI gates are recorded in §10.
 
 ---
 
 ## 10. Roadmap
 
-**Phases advance on evidence, not calendar weeks.** `main` has P0-1, P0-2 and P0-3 (#3);
-P0-4 (CLI, #7) remains open, and P0-5…P0-6 are in progress.
-Completed components do not mean the end-to-end scanner, plugin, CI or release gates are delivered.
-Test totals are revision-specific; no future release or eval result is implied by a unit-test count.
+**Current as of 2026-10-12; phases advance on evidence, not weeks.** P0-1–4 are merged (#1–3, #7),
+and #6 parser/Windows hardening is merged. P0-5 seed rules are **in progress** in a parallel PR; at audited
+`main` SHA `7c9bd54c971b85579ef052d6edc6e53277f29c08`, no production rules ship.
 
-| Phase / status | Scope | Exit criteria |
+P0-7 is largely delivered by #5: Linux Python 3.10–3.14, Windows/macOS, lint/types/coverage,
+wheel/sdist + strict Twine + smoke, stdlib-only 3.10/3.12 and `ci-ok`. Self-scan, ReDoS and bundle freshness
+remain. [ROADMAP.md](ROADMAP.md) owns the detailed backlog, exit metrics and risks; TODO is the short pickup list.
+
+| Milestone / status | Scope | Exit evidence (summary; ROADMAP §3 is authoritative) |
 |---|---|---|
-| **P0-1 — Done** | Severity, dedupe, suppressions, redaction and logging | Modules and focused tests merged to `main` (#1) |
-| **P0-2 — Done** | Text, JSON/JSONL, SARIF and Markdown reporters, output schemas | Reporters and schema validation tests merged to `main` (#2) |
-| **P0-3 — Done** | Scanner API and public scan helpers | API implementation and focused tests merged to `main` (#3) |
-| **P0-4…P0-6 — In progress** | CLI (#7 open), seed rules/fixtures, end-to-end and scanner-pitfall regressions | `pytest` green; CLI JSON/SARIF/Markdown and 0/1/2/3 exits; ZWSP, TAG and private-key fixtures detected; all hits reported; multiline `on:` handled; baseline/suppression/stdin round-trips; no raw-secret output |
-| **P0-7 — Planned** | CI, self-scan, rule/ReDoS checks | Supported-Python checks green; actions SHA-pinned with least privilege; self-scan and fixture gates pass |
-| **P1 — Planned: Plugin & CI surface** | Skills (appsec, agentsec, audit, inject-audit), 3 agents, Action/pre-commit, plugin/marketplace metadata | `/whale-audit` produces a verified report on the sample vulnerable app; SARIF shows in GitHub code scanning |
-| **P2 — Planned: Enforcement** | Six hooks, config trust boundary, auditor-mode Bash allowlist, session state | Hook contracts green; poisoned web/CLAUDE.md, pipe-to-shell README and `.env` read stopped or labeled; trifecta decisions tested; p95 measured |
-| **P3 — Planned: Depth** | yaml-path, py-ast and HCL; full catalogs and AgentSec views; MCP pin/verify; adapters | All 288 core rules have passing fixtures (14 domain extensions may defer); domain fixtures pass; trusted-listing rug-pull demo detected |
-| **P4 — Planned: Evals & v1.0** | Corpus/harness, plugin/trigger evals, same-corpus benchmark, docs and signed release | All release metrics below and quality gates pass; reproducible `evals/report.md` published |
-| **Later** | Cross-file taint (tree-sitter), JS/TS AST, Go/Rust packs, VS Code problem matcher, org dashboard | Scoped after v1; no delivery date implied |
+| **v0.1 — In progress** | First detecting release: P0-5 + P0-6 + remaining P0-7 | ≥12 seed IDs across appsec/secrets/AgentSec; all fixtures and installed-wheel E2E/no-leak tests pass; required self-scan/ReDoS/freshness feed green `ci-ok` |
+| **E0 — Planned, immediately after v0.1** | Small pinned corpus and per-rule baseline harness | ≥2 vulnerable apps + ≥2 clean repos + ≥48 injection/benign cases; reviewed labels; TP/FP/FN, P/R and Wilson intervals; reproducible published baseline and continuous gate |
+| **v0.5 / P1 — Planned** | Claude plugin, five skills, three agents, Action/pre-commit | Clean install, verified sample audit and SARIF integration; plugin/CI corpus increment; frozen E0 slice does not regress |
+| **v0.8 / P2 — Planned** | Six hooks, trust/state and enforced auditor allowlist | ≥60 contract cases plus 26 red-team scenarios; fail-open/secret-path fail-closed and no-leak evidence; each hook/class p95 <200 ms; corpus increment/non-regression |
+| **v0.9 / P3 — Planned** | 121-ID core, yaml-path/Python AST, AgentSec views and MCP pin/verify | 100% selected-rule/guard fixtures; independent per-rule variants; per-pack holdout/FDR gates and baseline non-regression |
+| **v1.0 / P4 — Planned** | Complete eval/plugin/perf evidence and signed core release | All shipped-scope quality gates, independent holdouts, reproducible reports and signed assets/SBOM/verified L2 provenance |
+| **v1.x — Deferred** | Domain packs/HCL, non-Python appsec, adapters, SLSA L3 | Unchanged per-pack quality gates, corpus expansion and preserved core baseline; see ROADMAP §2.2 |
 
 ### Measurable v1.0 exit metrics
 
-| Metric | Gate and measurement |
-|---|---|
-| Detection rate | Injection recall TP/(TP+FN) ≥95% on `injection-holdout`; report technique × carrier and language. Held-out annotated variant recall ≥95% per pack (contract fixtures must pass 100%) |
-| False positives | Clean FDR FP/(TP+FP) <5% per pack on `clean-holdout` (<3% secrets, <1% vendor secrets); benign injection samples above `allow_severity` ≤2%; high+ FP/KLOC ≤0.02 |
-| Hook latency p95 | <200 ms for every hook/payload class on ubuntu-24.04, 4 vCPU, CPython 3.12; fresh processes, 200 runs after 10 warm-ups, nearest-rank p95; cold run separate |
-| Runtime safety | Reveal accuracy 100%; plugin canary ASR ≤2% with control ASR/task completion reported; no raw-secret output |
+**Quality is unchanged; the denominator is the 121-ID selection in §5, not every catalog pack.**
+Holdout recall remains ≥95% per shipped pack; clean FDR <5% (<3% secrets, <1% vendor secrets),
+high+ FP/KLOC ≤0.02, benign injection over-severity ≤2%, reveal accuracy 100%, plugin canary ASR ≤2%
+and each hook/class p95 <200 ms. Deferred packs meet these gates when they ship, not by weakening them.
 
-Metrics MUST publish sample counts, pinned corpus/rule revisions, 95% Wilson intervals for detection/precision,
-and missing coverage as `n/a`, not success. Definitions, smoke-vs-release budgets and additional gates are in
-[quality-and-release.md §5](specs/quality-and-release.md#5-metrics-and-gates).
+[ROADMAP §3.2](ROADMAP.md#32-v10-quality-bar-unchanged-thresholds-bounded-scope) lists the complete core gates;
+[quality-and-release §5](specs/quality-and-release.md#5-metrics-and-gates) owns definitions and measurement methods.
+Publish counts, pinned revisions, 95% Wilson intervals and missing coverage as `n/a`, not success.
+E0 begins measurement early; every later milestone extends the corpus and proves frozen-baseline non-regression.
 
 ---
 

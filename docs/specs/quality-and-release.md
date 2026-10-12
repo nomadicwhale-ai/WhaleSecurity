@@ -9,9 +9,14 @@ trusted publishing, Sigstore signing, the SBOM and provenance. The spec is norma
 RFC 2119). It builds on DESIGN.md §9 and §11, engine.md §2.6, §13, §15 and §17, and the quality sections of both rule
 catalogs. §11 lists where it departs from DESIGN.md.
 
-> **Target quality contract, not achieved results.** Test counts are minimum requirements, not today's test
-> inventory. CI/workflow, fixture, eval and release paths below are planned until [DESIGN §10](../DESIGN.md#10-roadmap)
-> exit criteria pass. Current engine unit tests live in `engine/tests/unit/`; no full eval report is published yet.
+> **Target quality contract, not achieved results; status dated 2026-10-12.** CI matrix, coverage,
+> stdlib/distribution checks and signed-release scaffolding are merged (#5); self-scan, ReDoS and bundle freshness
+> remain. Rule contracts, evals, plugin/hooks and completed release gates are separate deliverables; no full eval report exists yet.
+> [ROADMAP §2/§3](../ROADMAP.md#2-release-scope) owns delivery scope: v1.0 is 121 selected secrets/AgentSec/Python
+> appsec/GitHub Actions IDs plus plugin/hooks, evals and signed release; domain packs/HCL and adapters are v1.x.
+> Per-pack thresholds and semantics below are unchanged, applied to shipped packs/languages; deferred-pack corpus,
+> golden and adapter cases join their v1.x gates. E0 starts measurement immediately after v0.1, then every milestone
+> extends the corpus and preserves the frozen baseline. Current unit tests live in `engine/tests/unit/`.
 > AgentSec §3/§10/§11 refines hook state, trust, wiring and MCP verification; §13 shares this spec's release gates.
 
 **Contents:** 1 Test pyramid · 2 Fixtures and layout · 3 Evaluation corpora · 4 Ground truth · 5 Metrics and gates ·
@@ -596,8 +601,10 @@ a `tp` label that lists R (or a glob that matches R) and that R did not match wi
 
 ## 6. Benchmark against Semgrep, Gitleaks and Trivy
 
-The benchmark answers two questions: how whalescan compares with the tools it orchestrates, and what its adapters add
-on top of them. It is not a marketing table. It is published together with everything needed to reproduce it.
+The benchmark answers two questions: how native whalescan compares with standalone tools (v1.0 core scope), and
+what its adapters add (v1.x when adapters ship). The adapter commands/normalization cases below are not v1.0
+release dependencies; native comparisons retain the same pinned-corpus and fairness requirements.
+It is not a marketing table and is published with everything needed to reproduce it.
 
 Every tool scans the same pinned checkouts and the same `holdout` and `clean-holdout` splits. Each tool's findings are
 filtered to the files that all tools scanned, and KLOC is computed on that same file set. The tools themselves are
