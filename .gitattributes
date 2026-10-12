@@ -1,0 +1,7 @@
+# Preserve attack samples, BOMs, CRLF, trailing whitespace and missing final newlines.
+tests/fixtures/** -text linguist-vendored
+tests/golden/** -text
+tests/hooks/cases/** -text
+evals/injection-corpus/** -text linguist-vendored
+evals/smoke/** -text
+**/bundle.json linguist-generated

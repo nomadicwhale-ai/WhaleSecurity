@@ -38,12 +38,16 @@ Homepage = "https://github.com/nomadicwhale-ai/WhaleSecurity"
 where = ["src"]
 
 [tool.setuptools.package-data]
-whalescan = ["rules/bundle.json", "report/schemas/*.json", "py.typed"]
+whalescan = ["rules/bundle.json", "report/schemas/*.json", "py.typed", "_vendor/tomli/LICENSE"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
-markers = ["slow: long-running tests (ReDoS budgets, perf)"]
+markers = [
+  "slow: long-running tests (ReDoS budgets, perf)",
+  "property: Hypothesis tests",
+  "posix: requires POSIX filesystem or home-path semantics",
+]
 
 [tool.ruff]
 line-length = 110

@@ -1,0 +1,35 @@
+name: eval-nightly
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: eval-nightly
+  cancel-in-progress: false
+jobs:
+  engine-eval:
+    # TODO §8.5: add nightly 17 3 * * *, weekly 43 4 * * 0 and quarterly
+    # 11 6 1 1,4,7,10 * schedules after evals/corpora/perf/hooks exist.
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    permissions: {}
+    steps:
+      - run: echo "TODO nightly property profiles, holdout/injection evals and perf gates"
+  plugin-eval:
+    # TODO: weekly benchmark/plugin harness and protected evals environment.
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions: {}
+    steps:
+      - run: echo "TODO benchmark and plugin skill/safety evaluation"
+  report:
+    # TODO: generated regression and quarterly owner-review issues; issues:write
+    # belongs only on this job once the reporting harness is implemented.
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - run: echo "TODO publish evaluation results and open quarterly rule reviews"

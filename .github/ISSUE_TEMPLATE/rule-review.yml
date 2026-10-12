@@ -1,0 +1,20 @@
+name: Quarterly rule review
+description: Review an owner's rules and recent detection metrics
+title: "[Rule review] "
+body:
+  - type: textarea
+    id: rules
+    attributes: {label: Owner and rule list}
+    validations: {required: true}
+  - type: textarea
+    id: references
+    attributes: {label: Reference links checked and vendor-format changes}
+    validations: {required: true}
+  - type: textarea
+    id: issues
+    attributes: {label: FP/FN issues since the previous review}
+    validations: {required: true}
+  - type: textarea
+    id: metrics
+    attributes: {label: Metric trend and proposed actions}
+    validations: {required: true}

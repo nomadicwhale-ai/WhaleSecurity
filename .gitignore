@@ -11,6 +11,10 @@ venv/
 .ruff_cache/
 .coverage
 coverage.xml
+.hypothesis/
+build/
+dist/
+*.egg-info/
 htmlcov/
 .whalescan-cache/
 evals/corpus/_checkout/

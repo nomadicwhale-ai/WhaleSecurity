@@ -5,6 +5,7 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
 ## Status snapshot
 
 ### Done
+- **CI/governance:** hardened CI matrix, 90% coverage gate, stdlib/distribution checks, signed-release scaffolding (publication blocked pending full gates), and contribution/security templates. See [CONTRIBUTING.md](CONTRIBUTING.md) and [release setup/follow-ups](docs/RELEASING.md).
 - **Design:** [docs/DESIGN.md](docs/DESIGN.md) covers architecture, repo layout, rule schema, hooks, quality gates and roadmap.
 - **Specs (drafts, not yet reviewed):**
   - [docs/specs/engine.md](docs/specs/engine.md): engine, normative for v1.0.

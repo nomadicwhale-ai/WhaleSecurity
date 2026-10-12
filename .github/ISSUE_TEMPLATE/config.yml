@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/nomadicwhale-ai/WhaleSecurity/security/advisories/new
+    about: Report hook bypasses, secret leaks and unpublished injection techniques privately.
+  - name: Questions and discussions
+    url: https://github.com/nomadicwhale-ai/WhaleSecurity/discussions
+    about: Ask usage questions here; if Discussions is not enabled, contact @ganbayard.

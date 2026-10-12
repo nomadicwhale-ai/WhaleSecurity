@@ -1,0 +1,137 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  HYPOTHESIS_PROFILE: ci
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python tools/verify_release.py
+      - run: |
+          ruff check engine/src engine/tests tools tests
+          (cd engine && mypy --strict)
+          python tools/check_pins.py
+          python tools/check_stdlib_only.py
+          python -m pytest engine/tests tests --cov=whalescan --cov-branch --cov-fail-under=90
+
+  build:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          requirements: requirements/release.txt
+      - name: Reproducible distributions and checksums
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          python -m build --no-isolation --sdist --wheel --outdir dist engine
+          python -m build --no-isolation --wheel --outdir "$RUNNER_TEMP/again" engine
+          cmp dist/*.whl "$RUNNER_TEMP"/again/*.whl
+          python -m twine check --strict dist/*
+          python tools/check_dist.py dist
+          (cd dist && sha256sum -- *.whl *.tar.gz > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  attest-sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+          path: dist
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
+        with:
+          inputs: dist/*.whl dist/*.tar.gz dist/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-dist-signed
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release-gates:
+    # Publication is opt-in AND fails closed while §5.2/§9 tooling is unfinished.
+    # TODO implement full evaluations, pack/plugin versions, compatibility, SBOM,
+    # rules/plugin archives, and attach their attestations BEFORE enabling publishing.
+    if: vars.PYPI_PUBLISH_ENABLED == 'true'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Refuse publication until complete release gates replace this step
+        run: |
+          echo "Publication blocked: implement quality-and-release §§5.2 and 9 prerequisites; see docs/RELEASING.md"
+          exit 1
+
+  publish-pypi:
+    if: vars.PYPI_PUBLISH_ENABLED == 'true'
+    needs: [attest-sign, release-gates]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/whalescan/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-dist
+          path: dist
+      - run: |
+          mkdir pypi
+          cp dist/*.whl dist/*.tar.gz pypi/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: pypi/
+          attestations: true
+
+  github-release:
+    # TODO §9: create signed-asset release + evaluation report after publishing.
+    if: ${{ false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: echo "TODO implement release notes and complete asset set"

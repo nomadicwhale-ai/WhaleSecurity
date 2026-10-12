@@ -1,0 +1,9 @@
+maintainers = ["@ganbayard"]
+
+[areas]
+"@whalesecurity/engine" = ["@ganbayard"]
+"@whalesecurity/appsec" = ["@ganbayard"]
+"@whalesecurity/secrets" = ["@ganbayard"]
+"@whalesecurity/agentsec" = ["@ganbayard"]
+"@whalesecurity/infra" = ["@ganbayard"]
+"@whalesecurity/trading" = ["@ganbayard"]

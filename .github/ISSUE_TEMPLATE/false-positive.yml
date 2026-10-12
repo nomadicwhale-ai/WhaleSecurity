@@ -1,0 +1,32 @@
+name: False positive
+description: whalescan reported something that is not a problem
+title: "[FP] WS-"
+body:
+  - type: markdown
+    attributes: {value: "Never paste real secrets, customer data or internal hostnames. Paste findings as printed (already redacted), and review them first."}
+  - type: input
+    id: rule
+    attributes: {label: Rule ID, placeholder: WS-INJ-001}
+    validations: {required: true}
+  - type: textarea
+    id: version
+    attributes: {label: Output of whalescan version -f json, render: json}
+    validations: {required: true}
+  - type: textarea
+    id: finding
+    attributes: {label: One redacted finding from -f json, render: json}
+    validations: {required: true}
+  - type: textarea
+    id: sample
+    attributes: {label: Minimal fake sample (becomes a neg_* fixture), render: text}
+    validations: {required: true}
+  - type: textarea
+    id: why
+    attributes: {label: Why this is not a problem}
+    validations: {required: true}
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact on CI or hooks
+      options: [Fails CI at default --fail-on high, Noise at medium or low, Hook feedback interrupts the agent]
+    validations: {required: true}

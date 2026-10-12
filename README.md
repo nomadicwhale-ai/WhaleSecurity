@@ -1,5 +1,7 @@
 # WhaleSecurity
 
+[![CI](https://github.com/nomadicwhale-ai/WhaleSecurity/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nomadicwhale-ai/WhaleSecurity/actions/workflows/ci.yml)
+
 Open-source security and prompt-injection scanning for AI coding agents.
 
 - **AppSec** protects the code the agent writes and reviews: injection, access control, crypto, secrets, IaC, CI/CD, and domain packs for FastAPI, Airflow/Spark, k8s, Terraform, LLM/RAG and trading systems.
