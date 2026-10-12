@@ -12,8 +12,8 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
   - [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): k8s, Docker, Terraform, CI/CD, proxies, FastAPI, Airflow, Spark, LLM and trading rule catalog.
   - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): tests, evals, CI and release.
   - [docs/specs/agentsec.md](docs/specs/agentsec.md): complete v1.0 target contract; rule packs, hooks and evals remain planned (see [DESIGN §10](docs/DESIGN.md#10-roadmap)).
-- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,918 unit tests passed, 3 skipped** (CPython 3.12, `main` at `0ca46b4`); ruff and mypy clean.
-  - P0-1 pipeline modules and P0-2 reporters (text, JSON/JSONL, SARIF, Markdown) and output schemas are merged to `main` (#1, #2).
+- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,953 unit tests passed, 3 skipped** (CPython 3.12, `main` at `d90a964`); ruff and mypy clean.
+  - P0-1 pipeline modules, P0-2 reporters (text, JSON/JSONL, SARIF, Markdown) and output schemas, and P0-3 Scanner API are merged to `main` (#1, #2, #3).
   - Contract: `model.py`, `errors.py`, `matchers/base.py`. Base provides combinators `all`, `any`, `not` and `near_lines`.
   - Config: `config.py` with discovery, precedence, the trust boundary for untrusted project config, and validation. It vendors `_vendor/tomli` for Python 3.10.
   - File handling:

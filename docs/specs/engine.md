@@ -8,8 +8,9 @@ engine can be built and tested without further design decisions. It is normative
 RFC 2119). Deviations from `docs/DESIGN.md` are listed in §19.
 
 > **Target contract, not a current inventory.** Layouts, API exports and CLI examples describe v1.0 requirements;
-> unimplemented paths/commands are not installation instructions. [DESIGN §10](../DESIGN.md#10-roadmap) tracks
-> delivery. AgentSec owns hook trust/view extensions; quality-and-release owns test/eval/release refinements.
+> unimplemented paths/commands are not installation instructions. P0-3 Scanner API is merged (#3); P0-4 CLI (#7)
+> remains open. [DESIGN §10](../DESIGN.md#10-roadmap) tracks delivery. AgentSec owns hook trust/view extensions;
+> quality-and-release owns test/eval/release refinements.
 
 **Contents:** 1 Layout · 2 CLI · 3 Configuration · 4 `.whalescanignore` · 5 Walker · 6 Classifier · 7 Rule format ·
 8 Matchers · 9 Dedupe and fingerprints · 10 Severity · 11 Suppressions and baseline · 12 Reporters · 13 Redaction ·

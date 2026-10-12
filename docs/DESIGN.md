@@ -70,7 +70,7 @@ never adds new findings unless it labels them `source: llm`, which keeps provena
 
 ## 3. Repository layout
 
-**Target v1 layout, not a current file inventory.** Only the engine foundation and docs are present on `main`;
+**Target v1 layout, not a current file inventory.** The engine foundation, Scanner API (P0-3, #3) and docs are present on `main`;
 plugin, pack, repository-level test, eval and CI paths below are planned. Existing unit tests live in
 `engine/tests/unit/`. `docs/ROADMAP.md` is a planned backlog; §10 and [TODO.md](../TODO.md) track current work.
 
@@ -289,7 +289,8 @@ the full contract, including throughput ≥2k files/s single-core regex tier and
 
 ## 10. Roadmap
 
-**Phases advance on evidence, not calendar weeks.** `main` has P0-1 and P0-2; P0-3…P0-6 are in progress.
+**Phases advance on evidence, not calendar weeks.** `main` has P0-1, P0-2 and P0-3 (#3);
+P0-4 (CLI, #7) remains open, and P0-5…P0-6 are in progress.
 Completed components do not mean the end-to-end scanner, plugin, CI or release gates are delivered.
 Test totals are revision-specific; no future release or eval result is implied by a unit-test count.
 
@@ -297,7 +298,8 @@ Test totals are revision-specific; no future release or eval result is implied b
 |---|---|---|
 | **P0-1 — Done** | Severity, dedupe, suppressions, redaction and logging | Modules and focused tests merged to `main` (#1) |
 | **P0-2 — Done** | Text, JSON/JSONL, SARIF and Markdown reporters, output schemas | Reporters and schema validation tests merged to `main` (#2) |
-| **P0-3…P0-6 — In progress** | API, CLI, seed rules/fixtures, end-to-end and scanner-pitfall regressions | `pytest` green; CLI JSON/SARIF/Markdown and 0/1/2/3 exits; ZWSP, TAG and private-key fixtures detected; all hits reported; multiline `on:` handled; baseline/suppression/stdin round-trips; no raw-secret output |
+| **P0-3 — Done** | Scanner API and public scan helpers | API implementation and focused tests merged to `main` (#3) |
+| **P0-4…P0-6 — In progress** | CLI (#7 open), seed rules/fixtures, end-to-end and scanner-pitfall regressions | `pytest` green; CLI JSON/SARIF/Markdown and 0/1/2/3 exits; ZWSP, TAG and private-key fixtures detected; all hits reported; multiline `on:` handled; baseline/suppression/stdin round-trips; no raw-secret output |
 | **P0-7 — Planned** | CI, self-scan, rule/ReDoS checks | Supported-Python checks green; actions SHA-pinned with least privilege; self-scan and fixture gates pass |
 | **P1 — Planned: Plugin & CI surface** | Skills (appsec, agentsec, audit, inject-audit), 3 agents, Action/pre-commit, plugin/marketplace metadata | `/whale-audit` produces a verified report on the sample vulnerable app; SARIF shows in GitHub code scanning |
 | **P2 — Planned: Enforcement** | Six hooks, config trust boundary, auditor-mode Bash allowlist, session state | Hook contracts green; poisoned web/CLAUDE.md, pipe-to-shell README and `.env` read stopped or labeled; trifecta decisions tested; p95 measured |
