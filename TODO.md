@@ -1,42 +1,22 @@
 # WhaleSecurity — Status & Next Steps
 
-Last updated: 2026-09-29. Use this file to pick up work: finish the items in order, tick them off and keep it up to date.
+Last updated: **2026-10-12**. This is the short pickup list; [docs/ROADMAP.md](docs/ROADMAP.md) owns milestone
+scope, dependencies, acceptance criteria and risks. [DESIGN §10](docs/DESIGN.md#10-roadmap) is the summary.
 
 ## Status snapshot
 
-### Done
-- **CI/governance:** hardened CI matrix, 90% coverage gate, stdlib/distribution checks, signed-release scaffolding (publication blocked pending full gates), and contribution/security templates. See [CONTRIBUTING.md](CONTRIBUTING.md) and [release setup/follow-ups](docs/RELEASING.md).
-- **Design:** [docs/DESIGN.md](docs/DESIGN.md) covers architecture, repo layout, rule schema, hooks, quality gates and roadmap.
-- **Specs (drafts, not yet reviewed):**
-  - [docs/specs/engine.md](docs/specs/engine.md): engine, normative for v1.0.
-  - [docs/specs/rules-appsec-secrets.md](docs/specs/rules-appsec-secrets.md): appsec + secrets rule catalog.
-  - [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): k8s, Docker, Terraform, CI/CD, proxies, FastAPI, Airflow, Spark, LLM and trading rule catalog.
-  - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): tests, evals, CI and release.
-  - [docs/specs/agentsec.md](docs/specs/agentsec.md): complete v1.0 target contract; rule packs, hooks and evals remain planned (see [DESIGN §10](docs/DESIGN.md#10-roadmap)).
-- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,953 unit tests passed, 3 skipped** (CPython 3.12, `main` at `d90a964`); ruff and mypy clean.
-  - P0-1 pipeline modules, P0-2 reporters (text, JSON/JSONL, SARIF, Markdown) and output schemas, and P0-3 Scanner API are merged to `main` (#1, #2, #3).
-  - Contract: `model.py`, `errors.py`, `matchers/base.py`. Base provides combinators `all`, `any`, `not` and `near_lines`.
-  - Config: `config.py` with discovery, precedence, the trust boundary for untrusted project config, and validation. It vendors `_vendor/tomli` for Python 3.10.
-  - File handling:
-    - `textio.py`: BOM and encoding handling, binary sniff, positions.
-    - `ignore.py`: gitignore semantics plus rule-scoped `#!rules` sections.
-    - `walker.py`: git or filesystem walk, symlink policy, size caps.
-    - `classify.py`: path, extension and content-sniff tables.
-  - Rules:
-    - `schema.py`: a stdlib JSON-Schema validator.
-    - `lint.py`: ReDoS lint rules R1–R7.
-    - `loader.py`: normalization, semantic checks, pack selection, applicability index.
-    - `cache.py`: a JSON cache (not pickle).
-    - `fixtures.py`: `pos*`/`neg*` fixtures, `# expect:` annotations and sidecar files.
-  - `yamlite.py`: a YAML subset parser with source positions and raw keys, so `on:` stays the string `on`. Alias bombs are capped. It is differentially tested against PyYAML.
-  - Text matchers:
-    - `regex.py`: all hits per file, with report and secret groups.
-    - `multiline.py`: pattern and sequence forms.
-    - `unicode.py`: ZW, BIDI, TAG, VS, PUA, CTRL and HOMOGLYPH detection, reveal markers, TAG decoding.
-    - `entropy.py`: Shannon entropy with context and placeholder guards.
+**The engine/API/CLI and most CI are merged; production seed rules are in progress.**
 
-### Incomplete
-- `docs/specs/claude-plugin.md`: not written. The verified Claude Code plugin, skill, agent and hook format facts are summarized under P1 below.
+- **Done:** P0-1 pipeline (#1), P0-2 reporters (#2), P0-3 API (#3), P0-4 CLI (#7), parser/Windows hardening (#6).
+- **CI largely done (#5):** Linux Python 3.10–3.14, Windows/macOS 3.12, lint/types, ≥90% coverage,
+  wheel/sdist + strict Twine + wheel smoke, stdlib-only 3.10/3.12 and `ci-ok`; self-scan, ReDoS and bundle freshness remain.
+- **Validated snapshot:** **2,164 passed, 3 skipped**, Linux CPython 3.12.13, audited `main`
+  [`7c9bd54`](https://github.com/nomadicwhale-ai/WhaleSecurity/commit/7c9bd54c971b85579ef052d6edc6e53277f29c08).
+  This is the repository suite count, not measured detection quality; [ROADMAP §1](docs/ROADMAP.md#1-current-status) records the command.
+- **Specs/design:** engine, rule catalogs, AgentSec and quality/release contracts exist; implementation evidence
+  is separate. The detailed roadmap is now present; the Claude plugin format spec remains to be written (WS-RM-010).
+- **Planned:** plugin, six hooks, core-depth and eval evidence; signed-release scaffolding is not a completed release.
+  Publication stays blocked pending applicable gates and maintainer approval ([release follow-ups](docs/RELEASING.md)).
 
 ## Dev setup
 
@@ -46,68 +26,26 @@ pip install -e 'engine[dev]'
 cd engine && ruff check src tests && mypy src && pytest -q
 ```
 
-## Next TODOs (in order)
+## Next actions (dependency order)
 
-### P0: finish the engine core (target v0.1)
-- [x] **P0-1 Pipeline modules** (done: `severity.py`, `dedupe.py`, `suppress.py`, `redact.py`, `log.py`, 71 tests) (spec §9, §10, §11, §13, §18):
-  - `severity.py`: BASE × reachability × exposure, bands, ordering.
-  - `dedupe.py`: normalized snippet, `fingerprint` and `content_fingerprint`, occurrence index, the 4-step dedupe.
-  - `suppress.py`: inline markers with a required reason and `until=`; the baseline file with create, update and prune; hard exclusions for `inject` and `WS-AGT` in agent-config and doc files.
-  - `redact.py`: redaction formats by length, keeping the PEM header, a sweep of known secrets, then reveal.
-  - `log.py`: logging with a redacting filter.
-- [x] **P0-2 Reporters** (done: text, json/jsonl, sarif, markdown, 4 JSON schemas, 24 tests; SARIF validated against the official schema) (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Output schemas are validated in tests; the mypy errors in `model.py` are cleared.
-- [x] **P0-3 API** (spec §16): `api.py` with a `Scanner` that runs walker → classify → applicability index → keyword prefilter → `evaluate` → filters → findings → dedupe → suppress → sort. Also module-level cached `scan_text` and `scan_injection` for hooks. Add a process pool above 200 files (§15.3) and the time budget (§15.4).
-- [x] **P0-4 CLI** (spec §2, §17):
-  - Commands: `scan`, `inject`, `secrets`, `baseline create/update`, `rules list/test/explain` (including `--redos`) and `version`.
-  - Wiring: stdin conventions, `--also FORMAT=PATH`, `--fail-on`.
-  - Exit codes 0/1/2/3 and 130. `cli.py` imports only `argparse`, `os` and `sys` at module level.
-- [ ] **P0-5 Seed rules:** `tools/build_bundle.py` compiles `rules/**/*.yaml` into `rules/bundle.json`. Start with about 12 seed rules, each with fixtures in `tests/fixtures/<ID>/`, taken from the rule catalogs:
-  - `subprocess` with `shell=True`, `eval` on request data, SQL string formatting, `yaml.load`, `verify=False`, `pickle.loads`;
-  - an AWS access key, a GitHub token, a private key block (the pattern starts with dashes), a DB URL with a password, a generic entropy rule;
-  - zero-width characters, TAG smuggling, bidi controls, and an override phrase.
-- [ ] **P0-6 End-to-end and regression tests:**
-  - CLI runs on a temp repo producing JSON, SARIF and Markdown, with the expected exit codes.
-  - A baseline round-trip, inline suppression with and without a reason, and stdin mode.
-  - Regressions: a dash-leading pattern, ZWSP and TAG detection, every hit reported per file, no raw secret in any output.
-- [ ] **P0-7 CI:** `.github/workflows/ci.yml` running ruff, mypy, pytest on Python 3.10–3.13, `rules test --redos`, and a self-scan. Pin actions by SHA and use `permissions: read-all`.
+**v0.1 is the first detecting release; E0 measures it before plugin expansion.** Acceptance criteria live only
+in [ROADMAP §4](docs/ROADMAP.md#4-issue-ready-backlog); tick these off only when the linked evidence is accepted.
 
-### Specs: finish and review (cheap, can run in parallel with P0)
-- [x] Finish `docs/specs/agentsec.md`: 41 WS-AGT rules, hook/state decisions, MCP hashing/storage and 26 red-team scenarios; implementation and measured evals are separate roadmap gates.
-- [ ] Write `docs/specs/claude-plugin.md` using the format facts in P1.
-- [ ] Compile and test every regex in the three rule catalogs: each must have a positive and a near-miss negative sample, and run in under 50 ms on 100 KB of adversarial input.
-- [ ] Write `docs/ROADMAP.md` (planned, not yet present) from the specs: an issue-ready backlog with IDs, dependencies and acceptance criteria; current status-based phases and release metrics are in [DESIGN §10](docs/DESIGN.md#10-roadmap).
+- [ ] **WS-RM-001 / P0-5 — In progress:** finish catalog seed rules, annotated fixtures and the shipped bundle (parallel PR).
+- [ ] **WS-RM-002 / P0-6:** verify installed-wheel detection, report/exit-code, baseline/suppression/stdin and no-leak regressions.
+- [ ] **WS-RM-003–005 / remaining P0-7:** make self-scan, `rules test --redos` and bundle freshness/wheel detection required by `ci-ok`.
+- [ ] **WS-RM-006:** record v0.1 exit evidence; do not infer release readiness from scaffolding.
+- [ ] **WS-RM-007 / E0:** pin a small vulnerable/clean/injection corpus and independently review labels.
+- [ ] **WS-RM-008 / E0:** implement per-rule TP/FP/FN and precision/recall with Wilson intervals.
+- [ ] **WS-RM-009 / E0:** publish the reproducible baseline and enable continuous eval/non-regression gates.
 
-### P1: Claude Code plugin and CI surface (target v0.5)
-- [ ] `.claude-plugin/plugin.json`:
-  - Only `name` (kebab-case) is required. Optional fields include `version`, `description`, `author{name,email,url}`, `homepage`, `repository`, `license` and `keywords`.
-  - Components are discovered from `skills/<name>/SKILL.md`, `agents/*.md` and `hooks/hooks.json`.
-  - Also add `.claude-plugin/marketplace.json`.
-- [ ] Skills: `whale-appsec` and `whale-agentsec` (discipline, auto-loaded); `whale-audit`, `whale-inject-audit` and `whale-threat-model` (slash commands).
-  - Each is a SKILL.md with frontmatter `name`, `description` and `argument-hint`, uses `$ARGUMENTS`, and puts detail in `references/`.
-- [ ] Agents: `appsec-auditor`, `injection-auditor` and `finding-verifier`.
-  - Use real tool names: `Read, Grep, Glob, Bash`. `Shell` and `Delete` are not valid tool names.
-  - Read-only behavior is enforced by the hook allowlist, not by the prompt.
-- [ ] `action.yml`: a composite GitHub Action that runs the scan and uploads SARIF. Also `.pre-commit-hooks.yaml`.
+## Following milestones
 
-### P2: enforcement hooks (target v0.8)
-- [ ] `hooks/hooks.json` using `${CLAUDE_PLUGIN_ROOT}`:
-  - `guard_read.py` (PreToolUse on Read, Grep and Glob) denies secret paths.
-  - `guard_bash.py` (PreToolUse on Bash):
-    - denies `curl|sh`, `rm -rf /` and reads of secret paths;
-    - asks before a force-push, `--no-verify`, `sudo`, and `terraform apply` or `kubectl delete`.
-  - `scan_tool_output.py` (PostToolUse on WebFetch, WebSearch, `mcp__.*` and Bash) adds `additionalContext` with a defanged, revealed warning.
-  - `scan_edit.py` (PostToolUse on Edit, Write and MultiEdit) runs appsec on the changed lines.
-  - `mcp_verify.py` (SessionStart) detects MCP tool-description drift.
-- [ ] Hook output: PreToolUse returns `hookSpecificOutput.permissionDecision` (`allow`, `deny` or `ask`) with a reason. The hooks fail open, except that the secret-path denials fail closed.
-- [ ] Hook contract tests: feed fixed JSON on stdin and assert the decision.
+**v1.0 is the 121-ID core, not all 302 catalog IDs.** The [scope/count derivation](docs/ROADMAP.md#21-core-count-121-catalog-ids)
+selects secrets, AgentSec, Python appsec and non-extension GitHub Actions; per-pack quality gates are unchanged.
 
-### P3: depth (target v0.9)
-- [ ] Matchers: `yamlpath.py` (path grammar, promotion for `on:`, predicates, yaml11 vs yaml12 values), `pyast.py` (function-local taint, source sets, `fastapi_route`), and `hcl.py` with `hcllite.py`.
-- [ ] Rule packs: implement the full catalogs (288 core rules; 14 domain extensions may defer), each with pos/neg fixtures.
-- [ ] `mcp pin/verify`.
-- [ ] Adapters: semgrep, gitleaks, trivy and osv.
-
-### P4: evals and v1.0
-- [ ] Eval corpus pinned by SHA (Juice Shop, NodeGoat, WebGoat, DVWA, TerraGoat, Kubernetes Goat, CI/CD Goat), clean repos to measure false positives, and an in-house injection corpus.
-- [ ] Per-rule precision, recall and F1 report. Release when recall ≥ 95%, false positives < 5%, and hook p95 < 200 ms.
-- [ ] `release.yml`: PyPI trusted publishing, sigstore signing and an SBOM. Also CHANGELOG, SECURITY.md, CONTRIBUTING.md, and tag v1.0.0.
+- **v0.5 / P1:** plugin format spec, skills/agents, Action/pre-commit and corpus increment (WS-RM-010–013).
+- **v0.8 / P2:** six enforcement hooks, trust/state, measured safety/latency and corpus increment (WS-RM-014–017).
+- **v0.9 / P3:** selected core rules, yaml-path/Python AST, AgentSec views/MCP and corpus increment (WS-RM-018–021).
+- **v1.0 / P4:** complete independent eval/perf/plugin evidence and signed core release (WS-RM-022–025).
+- **v1.x:** domain packs/HCL, non-Python appsec, adapters and SLSA L3 (WS-RM-026–029); no delivery dates implied.
