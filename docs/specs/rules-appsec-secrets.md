@@ -6,11 +6,14 @@ the `secrets` pack (37 rules: cloud, VCS, AI, payments, SaaS, exchange/broker an
 credentials). It is the source of truth for `rules/appsec/*.yaml`, `rules/secrets/*.yaml` and
 `tests/fixtures/<RULE-ID>/`. Each rule has an ID, severity, confidence, CWE/OWASP mapping, target
 languages, matcher tier, the exact detection logic, its false-positive guards and a fix. Every
-regex in the tables below compiles under Python `re` (3.10+). Each one has been run against its
-listed samples and against 100 KB adversarial inputs, and none took more than 50 ms (the worst was
-about 36 ms, on CPython 3.11). The examples are tailored to the stack this project defends:
+regex MUST compile under Python `re` (3.10+) and pass its positive/negative samples. Release acceptance
+requires reproducible fixtures and <50 ms adversarial timing on the reference runner (§6); this catalog
+alone is not evidence those checks ran. The examples are tailored to the stack this project defends:
 FastAPI services, Airflow/Spark jobs, Postgres/MySQL/SingleStore, Kubernetes, CI pipelines, LLM
 agents and trading/transaction engines.
+
+> **Target catalog, not implemented rule inventory.** Pack and fixture paths below are planned; generated files,
+> matcher extensions and measured results must pass [DESIGN §10](../DESIGN.md#10-roadmap) before delivery.
 
 **Contents**
 
@@ -301,7 +304,7 @@ the key could place orders. Scope checks (withdrawal permission, IP allowlist) b
 
 The four rules below validate against the rule JSON Schema in engine.md §7.2 as written. Their
 regexes are the same strings as in the tables; one source generates both and checks them against
-the fixtures. Fixture conventions follow engine.md §3 (`rules test`):
+the fixtures. Fixture conventions follow engine.md §2.6 (`rules test`) and quality-and-release §2.2:
 - `# expect: <ID>` (or `//`, `--`, `<!--`) asserts a hit on that line.
 - Positions that cannot carry a comment go in a sidecar `expect.json`.
 - Every `pos*` file must hit exactly the expected lines, and every `neg*` file must produce zero
@@ -693,7 +696,7 @@ header with its body hashed. This pack adds these requirements:
 | Every `WS-SEC-*` rule that captures a value names it `(?P<secret>…)` / `secret_group: secret`. Structured rules keep the rest readable, for example `postgresql+asyncpg://ledger:Qx7v…[sha256:3c1e09a7]@pg-primary.prod.internal:5432/ledger`. | Triage needs host and user, not the password. |
 | Offline-validation results go into `properties` (`aws_account_id`, `jwt.{alg,exp,iss}`, `gcp_sa`, `verified`), never the value. | Useful context without the secret. |
 | `scan_edit.py` / `scan_tool_output.py` put only rule ID, file:line, the redacted snippet and the fix into `additionalContext`. | The agent must not see the raw secret, because it could repeat it into a commit, a comment or a tool call. |
-| `--debug` logs spans (`line:col-col`) for secrets-pack hits, never text. | Logs are outputs too. |
+| `-vv` DEBUG logs spans (`line:col-col`) for secrets-pack hits, never text (engine §18). | Logs are outputs too. |
 | `tests/test_redaction.py` runs every reporter and every hook on every `WS-SEC-*` fixture. It asserts that no substring of 8 or more characters of any raw fixture value appears. | The engine.md sweep catches whole values; this also catches partial leaks through truncation. |
 
 ### 5.2 Offline validation (default on, no network)
@@ -761,14 +764,14 @@ Bash command string and **denies** any command that contains a `WS-SEC-*` match,
 
 ## 6. Quality gates specific to these packs
 
-- **Contract** (`test_rules.py`): all 81 rules have fixtures. Multi-language rules need at least
+- **Contract** (`test_rules.py`): all 81 catalog rules MUST have fixtures before release. Multi-language rules need at least
   one `pos.*` per `lang` sub-matcher. `WS-SEC-K8S-001` uses `pos.yaml` (plain `Secret` +
   kubeconfig) and `neg.yaml` (SOPS-encrypted `Secret` + `SealedSecret`).
 - **ReDoS** (`test_redos.py`): the adversarial set is 100 KB each of repeated
   `a`, space, `(`, `"`, `'`, `` `${ ``, `x=`, `{`, `-`, `A`, `0`, `(a+`, `log(`, `a:`, `a@`, `//`,
   `(+++…)`, `sk-aaa…`, `eyJaaa…` and `secret=aaa…`. Each rule's own positive samples are also
-  repeated, whole and truncated at 2/3. Budget: 50 ms per regex; the catalog's current maximum is
-  about 36 ms (WS-ACC-005).
+  repeated, whole and truncated at 2/3. Budget: <50 ms per regex on the reference runner; publish the measured
+  maximum and runner metadata rather than treating an informal design check as a release result.
 - **Fixture hygiene**: vendor-format fixture values are random and fail provider checksums where
   a checksum exists. `tests/fixtures/**` is listed in `.whalescanignore` and in
   `.github/secret_scanning.yml` (`paths-ignore`). Each fixture header says "fake".
@@ -801,7 +804,8 @@ schema in engine.md §7.2. Every other part of this catalog uses the schema as i
      duplicate it.
    - FastAPI `CORSMiddleware`/`debug=True` stay in WS-API.
    - `spark.sql(f"...")` stays in WS-SPK.
-   - Committed `*.tfstate` belongs to WS-TF.
+   - Committed `*.tfstate` is a Terraform coverage gap: no WS-TF rule in the current catalog detects the
+     filename alone. Secret-bearing state content is still covered by the secrets pack.
    - Withdrawal/IP-scope checks on exchange keys belong to WS-TRD (domain).
 4. **Severity policy for secrets** (§3.1) is by blast radius, not by vendor.
 5. **Proposed: per-child `lang`** on `regex`/`multiline` children, so multi-language rules

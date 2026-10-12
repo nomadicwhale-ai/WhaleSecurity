@@ -9,6 +9,11 @@ trusted publishing, Sigstore signing, the SBOM and provenance. The spec is norma
 RFC 2119). It builds on DESIGN.md §9 and §11, engine.md §2.6, §13, §15 and §17, and the quality sections of both rule
 catalogs. §11 lists where it departs from DESIGN.md.
 
+> **Target quality contract, not achieved results.** Test counts are minimum requirements, not today's test
+> inventory. CI/workflow, fixture, eval and release paths below are planned until [DESIGN §10](../DESIGN.md#10-roadmap)
+> exit criteria pass. Current engine unit tests live in `engine/tests/unit/`; no full eval report is published yet.
+> AgentSec §3/§10/§11 refines hook state, trust, wiring and MCP verification; §13 shares this spec's release gates.
+
 **Contents:** 1 Test pyramid · 2 Fixtures and layout · 3 Evaluation corpora · 4 Ground truth · 5 Metrics and gates ·
 6 Benchmark · 7 Plugin and skill evaluation · 8 CI workflows · 9 Release process · 10 Governance · 11 Refinements
 
@@ -165,8 +170,9 @@ When a nightly run finds a counterexample, the PR that fixes it adds that input 
 | `redact`, `sweep`, markers | A random secret of ≥ 8 characters spliced into random text leaves no 8-character fragment of itself in the output. `sweep` is idempotent. The marker parser is total and runs in linear time on 100 KB |
 | `dedupe` | Inserting blank lines above a finding leaves `fingerprint` unchanged. A rename leaves `content_fingerprint` unchanged, but changes `fingerprint` |
 
-When the agentsec pack later adds decoders (HTML entities, percent-encoding, base64 unwrapping), each one joins this
-table with three properties: it is total, its output is at most 4× its input, and it is idempotent on plain input.
+AgentSec §6's planned decoders (HTML entities, percent-encoding, base64 unwrapping) MUST join this table with
+properties for total/bounded output, raw-span mapping and idempotence on plain input. Unicode normalization MAY
+expand text up to 4×; decode output additionally obeys AgentSec's per-blob, aggregate-byte and depth caps.
 
 ### 1.6 Hook contract tests
 
@@ -201,12 +207,13 @@ For each case, the harness makes these checks:
 | | `git push --force`, `--no-verify`, `sudo`, `pip install https://…`, and `terraform apply` or `kubectl delete` on a non-local context | `ask` |
 | | Controls: `pytest -q`, `curl -o dl.tgz …`, `rm -rf ./build`. In auditor mode, `rg` and `git blame` are allowed and `python -c` is not | As in DESIGN §6–§7 |
 | `scan_tool_output.py` | A `WebFetch` page with hidden CSS; an MCP result with a TAG payload; `git log` with an HTML-comment imperative; 1 MiB of output with the payload in its last 4 KiB | `additionalContext` naming the technique and offset, with the revealed snippet |
-| | Control: a clean page | Empty stdout |
+| | Control: a clean external page | First exposure supplies a provenance label, no attack warning; clean project content MAY be silent (AgentSec §10.4) |
 | `scan_edit.py` | A `Write` of a FastAPI router with an f-string SingleStore query; an `Edit` that adds `whalescan:ignore`; a `MultiEdit` that adds a DSN with a fake password | Redacted findings in `additionalContext` |
 | | Controls: `.env.example`, and a path under `tests/fixtures/` | Empty stdout |
-| `mcp_verify.py` | Pins match | Silent |
-| | A description changed; an unpinned server was added | `WS-AGT-MCP-001` with the revealed diff; `WS-AGT-MCP-004` |
-| | The pins file is missing | A one-line hint |
+| `guard_egress.py` | S2/S3 outbound WebFetch/MCP; money movement after exposure; secret-bearing hostile arguments | ask/deny per AgentSec §3.3; test unknown destination and state failure |
+| `mcp_verify.py` | Config pins match in fast SessionStart mode | No drift warning; tool metadata remains unverified without a trusted listing |
+| | Description changed in a trusted captured/live listing; unpinned server added | `WS-AGT-MCP-001` (diff only with previous metadata); `WS-AGT-MCP-004`; SessionStart MUST NOT launch a server |
+| | Pins missing; poisoned auto-loaded project instructions | One-line setup hint; instruction scan findings and state update (AgentSec §11.6) |
 
 **Failure modes (DESIGN §6)** are tested in-process. Each hook exposes `main(stdin, stdout, stderr, env) -> int` and
 reaches the engine only through `hooks/_lib/engine.py:load()`. The tests monkeypatch that function, so shipped code
@@ -215,9 +222,11 @@ needs no fault-injection switch.
 | Fault | `scan_*`, `mcp_verify.py` | Secret-path checks in `guard_read.py`, `guard_bash.py` |
 |---|---|---|
 | The engine import fails, the scan raises, `run.error` is set, or the time budget truncates the run | Exit 0, no decision, and a `systemMessage` matching `FAILOPEN_RE` | Still `deny`: these checks need no engine |
-| Malformed stdin JSON, or an unknown `tool_name` | Exit 0, allow, one line on stderr | `deny` (fail closed) |
+| Malformed stdin JSON preventing path validation | Exit 0, no decision, visible fail-open diagnostic | `deny` (fail closed) |
+| Unknown `tool_name` / unsupported event shape | No decision; visible not-scanned diagnostic | Do not falsely label scanned; registered path guards still validate recognized path events |
 | The path check raises (a `realpath` error, permission denied) | — | `deny` (fail closed) |
 | Invalid `.whalesecurity/config.toml` | Defaults, plus a `systemMessage` | Built-in secret paths are still enforced |
+| Missing/corrupt session state or lock failure | Egress checks fail open with a visible protection-unavailable warning; state MUST NOT reset to S0 | Secret-path checks still deny |
 
 `FAILOPEN_RE` is
 `(?i)^whalesecurity: [^\n]{0,200}\b(?:error|timed out|unavailable)\b[^\n]{0,200}\bfail(?:ed|ing)? open\b`.
@@ -560,7 +569,7 @@ a `tp` label that lists R (or a glob that matches R) and that R did not match wi
 | FP/KLOC | FP / (LOC/1000). LOC counts the non-blank lines of the files the engine actually scanned, after ignores and caps. Reported per pack, for all severities and for final severity ≥ high |
 | Triage coverage | triaged / (triaged + UNK), per rule and per split |
 | Holdout variant recall | Variants hit / total variants. A variant counts as hit only when every annotated line is hit (fixture semantics) |
-| Injection | Recall per technique × carrier. *Over-severity rate*: benign samples reported above `allow_severity`, divided by all benign samples. *Reveal accuracy*: hidden-character samples whose snippet shows the right marker (`[ZWSP]`, `[TAG:"…"]`, `[BIDI:RLO]`), divided by all such samples |
+| Injection | Recall TP/(TP+FN) per technique × carrier and language, plus micro overall. *Over-severity rate* (benign sample FP rate): benign samples reported above `allow_severity`, divided by all benign samples. *Reveal accuracy*: hidden-character samples whose snippet shows the right marker (`[ZWSP]`, `[TAG:"…"]`, `[BIDI:RLO]`), divided by all such samples |
 | Hook latency | Wall time from `Popen` to exit of a fresh `python3 hooks/<hook>.py` process, with the event on stdin. Measured N = 200 times after 10 warm-ups (rule and page caches warm), per hook and per payload class: `read-path`, `bash-cmd`, `edit-2k`, `edit-100k`, `out-64k`, `out-1m`, `session-3-servers`. Nearest-rank percentiles: p_q = sorted(x)[⌈q·N⌉ − 1]. Reports p50, p95, p99 and max, plus the first cold run separately |
 | Throughput | Files and bytes scanned per second: `files_scanned` and `bytes_scanned` over the wall seconds of `Scanner.scan_paths` with `jobs=1` and warm rule and OS caches, median of 5 runs. Reported per tier: *regex* (every matcher is regex, multiline, unicode or entropy), *structured* (yaml_path, hcl) and *py_ast*. Inputs: `evals/perf/gen_tree.py --files N --avg-kb 8 --seed 7` trees (40 % Python, 25 % YAML, 10 % HCL, 15 % Markdown, 10 % JS) and the clean checkouts |
 | Peak RSS | `ru_maxrss` of a fresh process scanning the 50 000-file tree |
@@ -1317,8 +1326,9 @@ In scope:
 - Engine: crashes, hangs or unbounded memory on crafted input; reads outside the scan roots; a raw secret in any
   output or log; code execution through config, rules, cache or adapters; HTML, mention or terminal-escape
   injection into reports.
-- Hooks: bypassing a `deny` from guard_read.py or guard_bash.py; scanned content that suppresses its own findings;
-  a hook that fails closed on attacker input.
+- Hooks: bypassing a `deny` from guard_read.py, guard_bash.py or guard_egress.py; scanned content that suppresses
+  its own findings; engine-dependent checks that fail closed on attacker input (pure secret-path checks intentionally
+  fail closed).
 - Agents: an auditor agent that executes, fetches or exfiltrates the content it scans.
 - Supply chain: the release pipeline, signatures, provenance, the PyPI project and the GitHub Action.
 - New, unpublished injection techniques that evade the agentsec pack. We add detection before disclosure.
@@ -1380,7 +1390,7 @@ body:
 
 ## 11. Refinements to DESIGN.md
 
-1. **Test tree.** Engine unit and property tests live in `engine/tests/` and ship in the sdist. Repository-level
+1. **Test tree.** Engine unit and property tests live in `engine/tests/` and ship in the sdist (not the wheel). Repository-level
    suites live in `tests/`. Hook tests move from `tests/test_hooks.py` into `tests/hooks/`, with cases, schemas and
    the latency benchmark. `tests/golden/`, `tests/property/` and `tests/plugin/` are new. A root `pyproject.toml`
    holds tool config only.
