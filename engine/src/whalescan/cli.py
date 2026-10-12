@@ -233,6 +233,12 @@ def _combine(results: list["ScanResult"], cfg: "Config") -> "ScanResult":
         f for r in results for f in (r._gate_findings if r._gate_findings is not None else r.findings)
     )
     run = results[0].run
+    sweeps = tuple(r.run._sweep for r in results if r.run._sweep is not None)
+    def sweep(value: str) -> str:
+        for finalize in sweeps:
+            value = finalize(value)
+        return value
+    run._sweep = sweep
     profile: dict[str, tuple[float, int]] = {}
     for result in results:
         for rule_id, (elapsed, hits) in result.run._profile.items():
@@ -268,20 +274,10 @@ def _injection(scanner: "Scanner", data: bytes, args: argparse.Namespace, filena
         truncated=truncated,
     )
     if args.reveal_out:
-        # Never echo a whole-input secret: use the scanner's detected spans as a sweep registry.
-        from .api import _scan_file
-        from .redact import Redactor
-        from .walker import ctx_from_bytes
-
-        redactor = Redactor()
-        loaded = ctx_from_bytes(scanned, filename, cfg=scanner.cfg)
-        if loaded.ctx is not None and filename == "<stdin>":
-            loaded.ctx.kind = "doc"
-        checked = _scan_file(loaded, scanner.rules, scanner.cfg, frozenset(), None, is_inject=True)
-        if loaded.ctx is not None:
-            for span in checked.spans:
-                redactor.add_span(loaded.ctx.text, span)
-        text = redactor.sweep(decode(data).text)
+        # Use the parent-run sweep, without matching or parsing the input a second time.
+        text = decode(data).text
+        if result.run._sweep is not None:
+            text = result.run._sweep(text)
         show = scanner.cfg.inject.reveal if args.reveal is None else args.reveal
         _write(reveal(text) if show else text, args.reveal_out)
     return result
@@ -604,7 +600,11 @@ def _baseline(args: argparse.Namespace, cfg: "Config", result: "ScanResult") -> 
     from . import __version__
     from .errors import UsageError
     from .suppress import Baseline
+    from .matchers.unicode import reveal
 
+    def clean(value: str) -> str:
+        return reveal(result.run._sweep(value) if result.run._sweep is not None else value)
+    reason = clean(args.reason) if args.reason is not None else None
     path = cfg.resolve_path(
         args.baseline_out or args.baseline or cfg.scan.baseline or ".whalesecurity/baseline.json"
     )
@@ -615,7 +615,7 @@ def _baseline(args: argparse.Namespace, cfg: "Config", result: "ScanResult") -> 
             raise UsageError("baseline exists; use --force to overwrite")
         baseline = Baseline.create(
             result.findings,
-            reason=args.reason,
+            reason=reason or "",
             allow_critical=args.allow_critical,
             tool_version=__version__,
             rules_hash=result.run.rules_hash,
@@ -636,9 +636,13 @@ def _baseline(args: argparse.Namespace, cfg: "Config", result: "ScanResult") -> 
             in_scope,
             prune=not args.no_prune,
             add_new=args.add_new,
-            reason=args.reason,
+            reason=reason,
             allow_critical=args.allow_critical,
         )
+    for entry in baseline.entries:
+        for key, value in entry.items():
+            if isinstance(value, str):
+                entry[key] = clean(value)
     baseline.save(path)
     print(f"kept {counts[0]} · pruned {counts[1]} · added {counts[2]}")
     return 0
@@ -896,6 +900,9 @@ def main(argv: list[str] | None = None) -> int:
         ):
             code = 3
         result.run.exit_code = code
+        from .matchers.unicode import reveal
+        result.run.argv = [reveal(result.run._sweep(arg) if result.run._sweep is not None else arg)
+                           for arg in (sys.argv[1:] if argv is None else argv)]
         _reports(result, args, cfg)
         if args.profile:
             print("profile: top rules by cumulative matching time", file=sys.stderr)

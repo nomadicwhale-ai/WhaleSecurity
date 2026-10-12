@@ -155,7 +155,11 @@ def test_also_same_run_and_output_file(repo: Path) -> None:
         b"FixtureCredential123456"
         not in primary + (repo / "out.sarif").read_bytes() + (repo / "out.md").read_bytes()
     )
-    assert primary == run(repo, "scan", "app.py", "-f", "json", "--deterministic").stdout
+    another = json.loads(run(repo, "scan", "app.py", "-f", "json", "--deterministic").stdout)
+    first = json.loads(primary)
+    first["run"].pop("argv")
+    another["run"].pop("argv")
+    assert first == another
 
 
 @pytest.mark.parametrize("extra", ["wrong", "bad=path", "json=", "json=-"])
@@ -594,6 +598,18 @@ def test_reveal_out_secret_doc_rule(repo: Path) -> None:
     )
     assert proc.returncode == 1
     assert b"FixtureCredential123456" not in proc.stdout + proc.stderr + (repo / "revealed.txt").read_bytes()
+
+
+def test_baseline_and_cli_metadata_sweep_known_values(repo: Path) -> None:
+    value = "FixtureCredential123456"
+    proc = run(repo, "baseline", "create", "app.py", "--reason", "accepted " + value)
+    assert proc.returncode == 0
+    assert value.encode() not in (repo / ".whalesecurity/baseline.json").read_bytes()
+    proc = run(repo, "scan", "app.py", "--no-baseline", "-f", "json", "--output", value + ".json")
+    assert proc.returncode == 1
+    assert value.encode() not in (repo / (value + ".json")).read_bytes()
+    doc = json.loads((repo / (value + ".json")).read_bytes())
+    assert doc["run"]["argv"]
 
 
 def test_python_module_entry_point(
