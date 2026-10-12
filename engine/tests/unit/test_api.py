@@ -369,6 +369,8 @@ def test_injection_cannot_be_hidden_by_nul_minified_or_encoding_seams(
     assert result.findings and result.stats.bytes_scanned == 18
     assert "[ZWSP]" in result.findings[0].snippet
     assert api._injection_input(b"\xff" * 40, 10)[1]
+    union = scanner(tmp_path, rule(match={"any": [{"regex": "DANGER"}, {"unicode": {"classes": ["ZW"]}}]}))
+    assert union.scan_text(b"\xffDANGER", filename="app.py").findings
 
 
 def test_partial_internal_result_and_private_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -187,7 +187,7 @@ def _scan_file(
             break
         if rule.id not in active:
             continue
-        if ctx.encoding_fallback and "unicode" in leaf_kinds(rule.match):
+        if ctx.encoding_fallback and leaf_kinds(rule.match) == {"unicode"}:
             continue
         filters = rule.filters
         if filters.get("file_regex") and not compile_pattern(filters["file_regex"], re.M).search(ctx.text):
