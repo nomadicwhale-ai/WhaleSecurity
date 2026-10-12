@@ -7,7 +7,8 @@ directory must not become a code-execution vector).
 * Key: `sha256(engine_version | schema_version | sorted (relpath, sha256(file)) of every rule source |
   rule-affecting config)`, plus the cache format and the Python minor version (lint results can differ).
 * File: `<cache>/rules-<key[:16]>.json`, written atomically (tmp + `os.replace`), mode 0600 in a 0700
-  directory owned by the current user. The newest `KEEP` files survive pruning; a hit refreshes the mtime.
+  directory owned by the current user on POSIX. Windows uses the configured directory's ACLs,
+  not synthetic POSIX mode bits. The newest `KEEP` files survive pruning; a hit refreshes the mtime.
 * Anything unexpected (foreign owner, loose permissions, symlinks, corrupt or mismatched JSON) is a cache
   miss, never an error: the cache can only make loading faster.
 """
@@ -99,7 +100,7 @@ class RuleCache:
     # -- directory safety ------------------------------------------------------------------------------------
 
     def _usable_dir(self, create: bool) -> bool:
-        """True when the directory exists (or was created) as a real directory we own, tightened to 0700."""
+        """A real directory we own where ownership is available; tighten POSIX modes only."""
         try:
             if create:
                 os.makedirs(self.directory, mode=0o700, exist_ok=True)
@@ -108,7 +109,7 @@ class RuleCache:
             return False
         if not stat.S_ISDIR(st.st_mode) or not _owned(st):
             return False
-        if st.st_mode & 0o077:
+        if os.name == "posix" and st.st_mode & 0o077:
             try:
                 os.chmod(self.directory, 0o700)
             except OSError:
@@ -214,12 +215,20 @@ def _owned(st: os.stat_result) -> bool:
 
 
 def _read_private(path: str) -> bytes | None:
-    """Read a cache file only if it is a regular, non-symlink file we own that nobody else can write."""
+    """Bounded regular-file read; POSIX checks write bits, Windows relies on directory ACLs.
+
+    Windows chmod/stat do not describe ACL access: even private files report synthetic group/
+    other-write bits. Keep the ownership check where supported and reject symlinks explicitly
+    when O_NOFOLLOW is unavailable, rather than treating those bits as a cache miss.
+    """
 
     def private(st: os.stat_result) -> str | None:
-        return None if _owned(st) and not st.st_mode & 0o022 else "not private"
+        writable = os.name == "posix" and bool(st.st_mode & 0o022)
+        return None if _owned(st) and not writable else "not private"
 
     try:
+        if not hasattr(os, "O_NOFOLLOW") and not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
         return read_regular_file(path, MAX_CACHE_BYTES, check=private)
     except (OSError, UnreadableFile):
         return None

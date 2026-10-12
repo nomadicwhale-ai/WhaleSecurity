@@ -626,7 +626,7 @@ def test_multi_document_yaml_pack(tmp_path: Any) -> None:
         ("p.json", '[{"id": "a", "id": "b"}]', "duplicate key"),
         ("p.json", "[NaN]", "invalid JSON constant"),
         ("p.json", "[1,", "invalid JSON"),
-        ("p.json", "[" * 100_000 + "]" * 100_000, "JSON"),
+        pytest.param("p.json", "[" * 100_000 + "]" * 100_000, "JSON", id="deep-json"),
     ],
 )
 def test_bad_pack_files(tmp_path: Any, name: str, content: str, message: str) -> None:

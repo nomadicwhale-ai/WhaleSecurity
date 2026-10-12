@@ -6,6 +6,7 @@ import json
 import os
 import stat
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -124,6 +125,64 @@ def test_loose_directory_permissions_are_tightened(tmp_path: Any) -> None:
     os.chmod(d, 0o777)  # noqa: S103 - the test needs a loose directory
     assert C.RuleCache(d).store(KEY, ruleset()) is not None
     assert stat.S_IMODE(os.stat(d).st_mode) == 0o700
+
+
+def test_windows_synthetic_modes_allow_cache_hits(tmp_path, monkeypatch):
+    cache = C.RuleCache(tmp_path / "cache")
+    rs = ruleset()
+    path = cache.store(KEY, rs)
+    assert path is not None
+    original_read = C.read_regular_file
+
+    def synthetic(st):
+        # Keep file type and ownership; Windows maps all three write bits to writable.
+        return os.stat_result((st.st_mode | 0o022, *st[1:]))
+
+    def read(path, limit, *, check):
+        return original_read(path, limit, check=lambda st: check(synthetic(st)))
+
+    def chmod_must_not_run(*args, **kwargs):
+        raise AssertionError("POSIX mode tightening is not meaningful on Windows")
+
+    attributes = {**vars(os), "name": "nt", "chmod": chmod_must_not_run,
+                  "lstat": lambda path: synthetic(os.lstat(path))}
+    attributes.pop("getuid", None)
+    attributes.pop("O_NOFOLLOW", None)
+    monkeypatch.setattr(C, "os", SimpleNamespace(**attributes))
+    monkeypatch.setattr(C, "read_regular_file", read)
+    back = cache.load(KEY)
+    assert back is not None and back.rules == rs.rules
+
+
+@pytest.mark.parametrize("platform,mode,uid,accepted", [
+    ("posix", 0o600, 7, True), ("posix", 0o666, 7, False),
+    ("nt", 0o666, 7, True), ("nt", 0o666, 8, False),
+])
+def test_private_read_preserves_ownership_and_posix_modes(monkeypatch, platform, mode, uid, accepted):
+    st = os.stat_result((stat.S_IFREG | mode, 1, 1, 1, uid, 7, 0, 0, 0, 0))
+
+    def read(path, limit, *, check):
+        assert limit == C.MAX_CACHE_BYTES
+        if reason := check(st):
+            raise LD.UnreadableFile(reason)
+        return b"safe JSON"
+
+    proxy = SimpleNamespace(**{**vars(os), "name": platform, "getuid": lambda: 7})
+    monkeypatch.setattr(C, "os", proxy)
+    monkeypatch.setattr(C, "read_regular_file", read)
+    assert C._read_private("unused.json") == (b"safe JSON" if accepted else None)
+
+
+def test_windows_cache_rejects_symlink_without_nofollow(monkeypatch):
+    attributes = {**vars(os), "name": "nt", "lstat": lambda path: SimpleNamespace(st_mode=stat.S_IFLNK)}
+    attributes.pop("O_NOFOLLOW", None)
+    monkeypatch.setattr(C, "os", SimpleNamespace(**attributes))
+
+    def read_must_not_run(*args, **kwargs):
+        raise AssertionError("a symlink must not be opened")
+
+    monkeypatch.setattr(C, "read_regular_file", read_must_not_run)
+    assert C._read_private("link.json") is None
 
 
 def test_key_mismatch_is_a_miss(tmp_path: Any) -> None:

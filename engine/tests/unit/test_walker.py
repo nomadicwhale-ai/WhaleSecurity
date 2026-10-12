@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -144,6 +145,34 @@ def test_dedupe_roots_and_overlap(tree: Path) -> None:
     w = Walker(cfg_for(tree, walker="fs"), root=tree)
     got = paths(w, [tree / "a", tree / "a", tree, tree / "a" / "b.py"])
     assert got == ["a/b.py", "a/c/d.py", *[p for p in EXPECTED_FS if not p.startswith("a/")]]
+
+
+def zero_direntry_inodes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model Windows DirEntry.stat without changing host OS behavior globally."""
+    original = Walker._scandir
+
+    def zero_inode(entry: Any, **kwargs: Any) -> os.stat_result:
+        st = entry.stat(**kwargs)
+        return os.stat_result((st.st_mode, 0, *st[2:]))
+
+    def scandir(self: Walker, directory: str, display: str) -> Any:
+        entries = original(self, directory, display)
+        if entries is None:
+            return None
+        return [SimpleNamespace(
+            name=e.name, path=e.path, is_symlink=e.is_symlink, is_dir=e.is_dir,
+            is_file=e.is_file, stat=lambda e=e, **kwargs: zero_inode(e, **kwargs),
+        ) for e in entries]
+
+    monkeypatch.setattr(Walker, "_scandir", scandir)
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_zero_direntry_inodes_do_not_drop_distinct_directories(tree, monkeypatch, follow):
+    zero_direntry_inodes(monkeypatch)
+    w = Walker(cfg_for(tree, walker="fs", follow_symlinks=follow), root=tree)
+    assert paths(w, [tree]) == EXPECTED_FS
+    assert all(not isinstance(identity, tuple) or identity[1] != 0 for identity in w._visited)
 
 
 def test_missing_root_is_usage_error(tree: Path) -> None:
@@ -325,6 +354,42 @@ def test_follow_symlinks_inside_roots(links: Path) -> None:
         "config",
         "escape_dir",
     ]
+
+
+def test_zero_direntry_inodes_preserve_file_and_directory_link_deduplication(links, monkeypatch):
+    zero_direntry_inodes(monkeypatch)
+    w = Walker(cfg_for(links, walker="fs", follow_symlinks=True), root=links)
+    assert paths(w, [links]) == ["real/a.py", "real/sub/b.py"]
+    assert all(not isinstance(identity, tuple) or identity[1] != 0 for identity in w._file_inodes)
+
+
+def test_no_inode_available_uses_real_paths_and_still_cuts_cycles(links, monkeypatch):
+    zero_direntry_inodes(monkeypatch)
+
+    def zero_stat(func):
+        def call(*args, **kwargs):
+            st = func(*args, **kwargs)
+            return os.stat_result((st.st_mode, 0, *st[2:]))
+        return call
+
+    proxy = SimpleNamespace(**{
+        **vars(os), "name": "nt", "stat": zero_stat(os.stat), "lstat": zero_stat(os.lstat),
+    })
+    monkeypatch.setattr(walker_mod, "os", proxy)
+    w = Walker(cfg_for(links, walker="fs", follow_symlinks=True), root=links)
+    assert paths(w, [links]) == ["real/a.py", "real/sub/b.py"]
+    assert w._visited and all(isinstance(identity, str) for identity in w._visited)
+    assert w._file_inodes and all(isinstance(identity, str) for identity in w._file_inodes)
+
+
+def test_identity_stat_failure_never_returns_zero_inode(tmp_path, monkeypatch):
+    st = os.stat_result((0, 0, 123, 0, 0, 0, 0, 0, 0, 0))
+
+    def unreadable(*args, **kwargs):
+        raise OSError("unavailable")
+
+    monkeypatch.setattr(walker_mod, "os", SimpleNamespace(**{**vars(os), "stat": unreadable}))
+    assert walker_mod._identity(str(tmp_path), st) == os.path.normcase(os.path.realpath(tmp_path))
 
 
 def test_follow_symlinks_links_first_when_real_not_scanned(links: Path) -> None:

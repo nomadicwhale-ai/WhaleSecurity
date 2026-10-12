@@ -378,7 +378,9 @@ relative to `--root`; explicit paths outside the root are reported absolute.
 ### 5.2 Symlink policy
 Default: symlinks (file or directory) are not followed and are counted as `skipped.symlink`. With
 `--follow-symlinks`, a link is followed only if `os.path.realpath(target)` lies inside one of the scan roots;
-directory cycles are cut by a `(st_dev, st_ino)` visited set. Links escaping the roots (a cloned repo's
+directory cycles are cut by a `(st_dev, st_ino)` visited set. A zero inode (Windows `DirEntry.stat`)
+triggers a fresh `os.stat`; if no ID is available, canonical real paths are used, never `(device, 0)`.
+Links escaping the roots (a cloned repo's
 `config -> ~/.aws/credentials`) are always skipped with a `symlink-escape` warning: the scanner MUST NOT read outside
 its roots, since redaction is the second line of defense, not the first.
 
@@ -1282,8 +1284,10 @@ The expensive part is YAML parsing, schema validation and lint, not `re.compile`
 normalized, validated rule set, the applicability index and the keyword tables as **JSON**, never pickle: a writable
 cache dir must not become a code-execution vector. Key: `sha256(engine_version | schema_version | sorted (relpath,
 sha256(file)) of every rule source | rule-affecting config)`. File: `<cache>/rules-<key[:16]>.json`, written
-atomically (tmp + `os.replace`), mode 0600 in a 0700 dir; the newest 5 are kept. Built-in rules load from the
-release-time `bundle.json`, so the hook path never parses YAML. Regexes compile lazily per process on the first file
+atomically (tmp + `os.replace`), mode 0600 in a 0700 dir on POSIX; the newest 5 are kept. Windows mode bits
+are synthetic, not ACL permissions: the configured cache directory must be protected by its user's ACLs.
+Windows retains regular-file, symlink and available ownership checks; failures remain cache misses.
+Built-in rules load from the release-time `bundle.json`, so the hook path never parses YAML. Regexes compile lazily per process on the first file
 where the rule is active (`re.Pattern` pickles as source anyway), so a single-file hook compiles only its ~20–40
 applicable rules.
 
