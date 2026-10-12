@@ -93,8 +93,63 @@ def test_import_discipline() -> None:
     assert proc.stdout.strip() == b"whalescan,whalescan.cli"
 
 
+def version_import_seconds(stderr: bytes) -> float:
+    roots = []
+    for line in stderr.splitlines():
+        if not line.startswith(b"import time:"):
+            continue
+        _, cumulative, module = line.split(b"|", 2)
+        if cumulative.strip().isdigit() and module.startswith(b" ") and not module.startswith(b"  "):
+            roots.append((int(cumulative), module.strip()))
+    start = next((i for i, (_, module) in enumerate(roots) if module == b"whalescan"), None)
+    assert start is not None, "importtime output must contain the whalescan import tree"
+    # Root cumulative times include their dependencies without counting nested imports twice.
+    # Later roots include imports made by the version handler, not just whalescan.* modules.
+    return sum(cumulative for cumulative, _ in roots[start:]) / 1_000_000
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        (
+            b"import time: self [us] | cumulative | imported package\n"
+            b"import time: 90000 | 90000 | site\n"
+            b"import time: 2500 | 2500 |   typing\n"
+            b"import time: 500 | 3000 | whalescan\n"
+            b"import time: 5000 | 5000 |   argparse\n"
+            b"import time: 1000 | 6000 | whalescan.cli\n"
+            b"import time: 400 | 400 | math\n"
+            b"import time: 3500 | 3500 |   _json\n"
+            b"import time: 500 | 4000 | json\n",
+            0.0134,
+        ),
+        (
+            b"import time: 1000 | 1000 | whalescan\n"
+            b"import time: 81000 | 81000 |   expensive_dependency\n"
+            b"import time: 1000 | 82000 | whalescan.cli\n",
+            0.083,
+        ),
+        (
+            b"import time: 1000 | 1000 | whalescan\n"
+            b"import time: 1000 | 1000 | whalescan.cli\n"
+            b"import time: 81000 | 81000 | version_dependency\n",
+            0.083,
+        ),
+    ],
+)
+def test_version_import_seconds(stderr: bytes, expected: float) -> None:
+    assert version_import_seconds(stderr) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("stderr", [b"", b"import time: 1000 | 1000 | site\n"])
+def test_version_import_seconds_requires_scanner_tree(stderr: bytes) -> None:
+    with pytest.raises(AssertionError, match="must contain the whalescan import tree"):
+        version_import_seconds(stderr)
+
+
 def test_startup_time_and_version() -> None:
     samples = []
+    import_samples = []
     for _ in range(3):
         start = time.perf_counter()
         proc = subprocess.run(
@@ -103,9 +158,54 @@ def test_startup_time_and_version() -> None:
             check=True,
         )
         samples.append(time.perf_counter() - start)
+        import_samples.append(version_import_seconds(proc.stderr))
         assert "version" in json.loads(proc.stdout)
         assert b"whalescan.api" not in proc.stderr
-    assert min(samples) < 0.080
+    # engine.md §15.1 defines the 80 ms cold-start budget on the Linux reference runner.
+    # Other OSes charge scanner import trees, excluding their process-creation overhead.
+    if sys.platform.startswith("linux"):
+        assert min(samples) < 0.080
+    else:
+        assert min(import_samples) < 0.080
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32", "darwin"])
+@pytest.mark.parametrize("expensive_import", [False, True])
+def test_startup_budget_separates_os_overhead(
+    platform: str, expensive_import: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stderr = b"import time: 1000 | 1000 | whalescan\n"
+    stderr += (
+        b"import time: 1000 | 81000 | whalescan.cli\n"
+        if expensive_import
+        else b"import time: 1000 | 1000 | whalescan.cli\n"
+    )
+    proc = subprocess.CompletedProcess([], 0, b'{"version": "test"}', stderr)
+    ticks = iter([0.0, 0.100, 1.0, 1.100, 2.0, 2.100])
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", platform)
+        patch.setattr(subprocess, "run", lambda *args, **kwargs: proc)
+        patch.setattr(time, "perf_counter", lambda: next(ticks))
+        if platform == "linux" or expensive_import:
+            with pytest.raises(AssertionError):
+                test_startup_time_and_version()
+        else:
+            test_startup_time_and_version()
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32", "darwin"])
+def test_startup_rejects_eager_api_import_on_every_os(platform: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = subprocess.CompletedProcess(
+        [],
+        0,
+        b'{"version": "test"}',
+        b"import time: 1000 | 1000 | whalescan\nimport time: 1000 | 1000 | whalescan.api\n",
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "platform", platform)
+        patch.setattr(subprocess, "run", lambda *args, **kwargs: proc)
+        with pytest.raises(AssertionError):
+            test_startup_time_and_version()
 
 
 @pytest.mark.parametrize("fmt", ["text", "json", "jsonl", "sarif", "markdown"])
