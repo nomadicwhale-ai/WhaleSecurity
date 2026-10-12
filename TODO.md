@@ -55,7 +55,7 @@ cd engine && ruff check src tests && mypy src && pytest -q
   - `redact.py`: redaction formats by length, keeping the PEM header, a sweep of known secrets, then reveal.
   - `log.py`: logging with a redacting filter.
 - [x] **P0-2 Reporters** (done: text, json/jsonl, sarif, markdown, 4 JSON schemas, 24 tests; SARIF validated against the official schema) (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Validate the output against the schemas in tests. This also clears the mypy errors in `model.py`.
-- [ ] **P0-3 API** (spec §16): `api.py` with a `Scanner` that runs walker → classify → applicability index → keyword prefilter → `evaluate` → filters → findings → dedupe → suppress → sort. Also module-level cached `scan_text` and `scan_injection` for hooks. Add a process pool above 200 files (§15.3) and the time budget (§15.4).
+- [x] **P0-3 API** (spec §16): `api.py` with a `Scanner` that runs walker → classify → applicability index → keyword prefilter → `evaluate` → filters → findings → dedupe → suppress → sort. Also module-level cached `scan_text` and `scan_injection` for hooks. Add a process pool above 200 files (§15.3) and the time budget (§15.4).
 - [ ] **P0-4 CLI** (spec §2, §17):
   - Commands: `scan`, `inject`, `secrets`, `baseline create/update`, `rules list/test/explain` (including `--redos`) and `version`.
   - Wiring: stdin conventions, `--also FORMAT=PATH`, `--fail-on`.

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .model import ScanResult
+
 
 class WhalescanError(Exception):
     """Base class for every error raised by whalescan."""
@@ -34,6 +39,7 @@ class AdapterError(WhalescanError):
 
 
 class InternalError(WhalescanError):
-    """Any unexpected exception."""
+    """Any unexpected exception, optionally retaining sanitized findings already produced."""
 
     exit_code = 3
+    partial_result: ScanResult | None = None

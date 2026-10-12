@@ -7,7 +7,7 @@ reporters and the public API. Keep it dependency-free and stable.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Literal
@@ -382,6 +382,9 @@ class RunInfo:
     error: dict[str, str] | None = None
     tool_version: str = ""
     rules_hash: str = ""
+    _profile: dict[str, tuple[float, int]] = field(default_factory=dict, repr=False)
+    # Parent-run output sweep; omitted by to_dict and never sent to process workers.
+    _sweep: Callable[[str], str] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -409,6 +412,8 @@ class ScanResult:
     diagnostics: tuple[Diagnostic, ...]
     stats: Stats
     run: RunInfo
+    # Gate before the output-only min_severity filter (§17); never serialized by reporters.
+    _gate_findings: tuple[Finding, ...] | None = field(default=None, repr=False, compare=False)
 
     @property
     def active(self) -> tuple[Finding, ...]:
@@ -416,7 +421,8 @@ class ScanResult:
         return tuple(f for f in self.findings if f.suppressed is None)
 
     def exit_code(self, fail_on: str = "high") -> int:
-        return 1 if any(severity_at_or_above(f.severity, fail_on) for f in self.active) else 0
+        gate = self.findings if self._gate_findings is None else self._gate_findings
+        return int(any(f.suppressed is None and severity_at_or_above(f.severity, fail_on) for f in gate))
 
     # Reporters are imported lazily to keep hook start-up cheap.
     def to_json(self) -> str:
