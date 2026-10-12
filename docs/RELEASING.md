@@ -3,7 +3,7 @@
 ## Current boundary
 **CI is enforced now; publication deliberately fails closed until the full release gates exist.** The source of truth is [quality-and-release §§8–10](specs/quality-and-release.md).
 
-- `ci.yml` runs lint, strict typing, Linux Python 3.10–3.14, macOS/Windows 3.12, ≥90% branch-inclusive coverage excluding vendored code, dependency/pin checks, and isolated wheel/sdist smoke imports. Only Python 3.14 is temporarily advisory because the deep-JSON fixture segfaults CPython; it becomes required once W4's bounded-nesting preflight fix merges.
+- `ci.yml` requires lint, strict typing, every Linux Python 3.10–3.14 and macOS/Windows 3.12 test leg, ≥90% branch-inclusive coverage excluding vendored code, dependency/pin checks, and isolated wheel/sdist smoke imports.
 - `release.yml` verifies tag/version/changelog/main ancestry, reruns tests, builds a byte-identical wheel twice, generates checksums, and prepares Sigstore signatures and GitHub provenance on tag pushes. No publication is initiated by this PR or this agent.
 - `PYPI_PUBLISH_ENABLED` is absent/false by default. Even if set true, `release-gates` currently fails intentionally; replace it only after implementing all normative release gates below. A PyPI publisher registration alone is insufficient.
 
