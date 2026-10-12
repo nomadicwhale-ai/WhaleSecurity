@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from ..errors import RuleError
+from ..jsonio import preflight
 from ..model import KINDS, AppliesTo, Confidence, Diagnostic, Rule, Severity
 
 BUNDLE_SCHEMA: Final = "whalescan/rules-bundle@1"
@@ -34,6 +35,7 @@ SOURCE_SETS: Final = frozenset({"web", "airflow", "cli", "llm", "net", "msg", "f
 PACK_SUFFIXES: Final = (".yaml", ".yml", ".json")
 
 MAX_RULE_FILE_BYTES: Final = 2 * 1024 * 1024  # same cap as a yamlite parse (§5.3)
+MAX_BUNDLE_BYTES: Final = 64 * 1024 * 1024  # the release bundle holds every built-in rule
 MAX_RULE_FILES: Final = 2_000
 MAX_RULES: Final = 10_000
 MAX_DIR_DEPTH: Final = 16
@@ -326,7 +328,7 @@ def read_regular_file(
 def read_source(src: SourceFile, limit: int = MAX_RULE_FILE_BYTES) -> bytes:
     """Read a rule source (see `read_regular_file`), capped at `limit` bytes."""
     if src.origin == "bundle":
-        limit = max(limit, 64 * 1024 * 1024)  # the release bundle holds every built-in rule
+        limit = max(limit, MAX_BUNDLE_BYTES)
     try:
         return read_regular_file(src.path, limit)
     except UnreadableFile as exc:
@@ -339,14 +341,15 @@ def read_source(src: SourceFile, limit: int = MAX_RULE_FILE_BYTES) -> bytes:
 
 def parse_source(src: SourceFile, data: bytes, *, yaml_loader: YamlLoader | None = None) -> list[RawRule]:
     """Decode and parse one source into raw rule objects (no validation yet)."""
-    if src.origin != "bundle" and len(data) > MAX_RULE_FILE_BYTES:
-        raise RuleError(f"{src.display}: rule file is larger than {MAX_RULE_FILE_BYTES} bytes")
+    limit = MAX_BUNDLE_BYTES if src.origin == "bundle" else MAX_RULE_FILE_BYTES
+    if len(data) > limit:
+        raise RuleError(f"{src.display}: rule file is larger than {limit} bytes")
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise RuleError(f"{src.display}: not valid UTF-8 (byte {exc.start})") from None
     if src.origin == "bundle":
-        return _bundle_raws(src, _json_load(text, src.display))
+        return _bundle_raws(src, _json_load(text, src.display, max_bytes=limit))
     if src.path.endswith(".json"):
         docs: Sequence[Any] = [_json_load(text, src.display)]
     else:
@@ -447,7 +450,7 @@ class _DuplicateKeyError(ValueError):
     pass
 
 
-def _json_load(text: str, where: str) -> Any:
+def _json_load(text: str, where: str, *, max_bytes: int = MAX_RULE_FILE_BYTES) -> Any:
     import json
 
     def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -462,6 +465,7 @@ def _json_load(text: str, where: str) -> Any:
         raise ValueError(f"invalid JSON constant {name}")
 
     try:
+        preflight(text, max_bytes=max_bytes)
         doc = json.loads(text, object_pairs_hook=pairs, parse_constant=bad_constant)
         # json.loads accepts escaped lone surrogates, but rule hashes and reports must be
         # valid UTF-8. Reject them at the input boundary, before deferred serialization.

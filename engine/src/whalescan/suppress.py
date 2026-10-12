@@ -14,12 +14,16 @@ import re
 from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from .config import SuppressConfig
 from .errors import ConfigError, UsageError
 from .ignore import rule_glob_match
+from .jsonio import preflight
 from .model import BASELINE_SCHEMA, Diagnostic, FileCtx, Finding, Severity, Suppression
+from .textio import read_file
+
+MAX_BASELINE_BYTES: Final = 64 * 1024 * 1024
 
 MARKER = re.compile(
     r"(?:#|//|--|/\*|<!--|;|\{#)\s*whalescan:ignore(?P<scope>-next-line|-file|-start|-end)?"
@@ -216,10 +220,13 @@ class Baseline:
     @classmethod
     def load(cls, path: str | os.PathLike[str]) -> Baseline:
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            # Preserve support for symlinked baselines, but bound the descriptor-checked read.
+            text = read_file(os.path.realpath(path), MAX_BASELINE_BYTES).decode("utf-8")
+            preflight(text, max_bytes=MAX_BASELINE_BYTES)
+            data = json.loads(text)
         except FileNotFoundError:
             raise ConfigError(f"baseline not found: {path}") from None
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, RecursionError) as e:
             raise ConfigError(f"unreadable baseline {path}: {e}") from None
         if not isinstance(data, dict) or data.get("schema") != BASELINE_SCHEMA:
             raise ConfigError(f"{path}: not a {BASELINE_SCHEMA} file")

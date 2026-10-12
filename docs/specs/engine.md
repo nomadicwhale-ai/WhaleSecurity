@@ -397,6 +397,10 @@ Files are opened with `O_RDONLY | O_NOFOLLOW` where available and read in one ca
 config and ignore readers retain their 1 MiB safety caps and reject special files without blocking. Ignore files
 use at most 20,000 patterns of 4,096 characters each. No separate line-length cutoff discards content: the file
 byte cap also bounds a single line. Explicit/user config symlinks are resolved before the regular-file check.
+Every untrusted JSON reader checks UTF-8 size and at most 64 open arrays/objects before stdlib decoding;
+quoted/escaped delimiters do not count. Bundles, rule caches and baselines are capped at 64 MiB;
+fixture sidecars retain their 256 KiB cap. Limit failures remain `RuleError`, `ConfigError`, `FixtureError`,
+or a cache miss, respectively. Baseline symlinks are resolved before a bounded regular-file read.
 The deterministic Hypothesis campaign in `engine/tests/security/` covers malformed input, safe-subset PyYAML
 agreement, and these boundaries; killable subprocess tests enforce no-hang budgets for adversarial inputs.
 

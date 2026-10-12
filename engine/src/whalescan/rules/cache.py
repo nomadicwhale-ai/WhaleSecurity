@@ -22,6 +22,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
+from ..jsonio import preflight
 from .loader import (
     RULE_SCHEMA_VERSION,
     RuleIssue,
@@ -127,7 +128,9 @@ class RuleCache:
         if data is None:
             return None
         try:
-            doc = json.loads(data.decode("utf-8"))
+            text = data.decode("utf-8")
+            preflight(text, max_bytes=MAX_CACHE_BYTES)
+            doc = json.loads(text)
             if not isinstance(doc, dict) or doc.get("schema") != CACHE_SCHEMA or doc.get("key") != key:
                 raise ValueError("cache entry does not match its key")
             ruleset = RuleSet.from_dict(_expect_dict(doc.get("ruleset")))
