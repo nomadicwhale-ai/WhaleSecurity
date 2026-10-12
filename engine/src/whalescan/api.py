@@ -168,7 +168,8 @@ def _scan_file(
         and not any_glob_match(r.applies_to.exclude_globs, ctx.path)
         and (r.applies_to.max_bytes is None or ctx.size <= r.applies_to.max_bytes)
         and (
-            not cfg.scan.skip_minified
+            is_inject
+            or not cfg.scan.skip_minified
             or "minified" not in ctx.tags
             or r.pack_root == "secrets"
             or r.applies_to.include_minified
@@ -468,6 +469,7 @@ class Scanner:
         is_inject: bool = False,
         source_label: str | None = None,
         truncated: bool = False,
+        input_size: int | None = None,
     ) -> ScanResult:
         start = time.monotonic()
         deadline = _deadline(self.cfg.scan.time_budget_ms if budget is None else budget)
@@ -479,11 +481,30 @@ class Scanner:
         matcher = IgnoreMatcher(self.cfg.root or os.getcwd(), extra=self.cfg.scan.exclude)
         if filename != "<stdin>" and matcher.is_ignored(filename):
             return self._finish([], Stats(files_skipped={"ignored": 1}), [], {filename}, start, Redactor())
-        loaded = (
-            ctx_from_bytes(text, filename, cfg=self.cfg, source_label=source_label)
-            if isinstance(text, bytes)
-            else Loaded(ctx_from_text(text, filename, cfg=self.cfg, source_label=source_label))
-        )
+        if isinstance(text, bytes) and is_inject:
+            from .textio import decode
+
+            decoded = decode(text, filename)
+            loaded = Loaded(
+                ctx_from_text(
+                    decoded.text,
+                    filename,
+                    cfg=self.cfg,
+                    size=len(text) if input_size is None else input_size,
+                    encoding=decoded.encoding,
+                    fallback=decoded.fallback,
+                    source_label=source_label,
+                ),
+                diagnostics=decoded.diagnostics,
+            )
+        else:
+            loaded = (
+                ctx_from_bytes(text, filename, cfg=self.cfg, source_label=source_label)
+                if isinstance(text, bytes)
+                else Loaded(
+                    ctx_from_text(text, filename, cfg=self.cfg, size=input_size, source_label=source_label)
+                )
+            )
         if is_inject and filename == "<stdin>" and loaded.ctx is not None:
             loaded.ctx.kind = "doc"
         result = _scan_file(
@@ -662,6 +683,32 @@ def scan_text(
     )
 
 
+def _injection_input(data: bytes, limit: int) -> tuple[str | bytes, bool]:
+    """First/last byte windows, without making valid Unicode look like a latin-1 file.
+
+    A seam may cut UTF-8 or UTF-16/32 characters. Decode the windows independently with the
+    original codec so such a cut cannot disable the Unicode matcher for the entire document.
+    """
+    from .textio import decode
+
+    if limit < 1:
+        raise UsageError("max_bytes must be positive")
+    if len(data) <= limit:
+        return data, False
+    head, tail = data[: limit // 2], data[-(limit - limit // 2) :]
+    decoded = decode(data)
+    if decoded.fallback:
+        return head + b"\n" + tail, True
+    codec = decoded.encoding.replace("-sig", "")
+    width = 4 if codec.startswith("utf-32") else (2 if codec.startswith("utf-16") else 1)
+    if width > 1:
+        tail = tail[len(tail) % width :]
+    header = head.decode(decoded.encoding, errors="replace")
+    if width > 1 and header.startswith("\ufeff"):
+        header = header[1:]
+    return header + "\n" + tail.decode(codec, errors="replace"), True
+
+
 def scan_injection(
     text: str | bytes,
     *,
@@ -673,12 +720,15 @@ def scan_injection(
     scanner = _scanner(os.getcwd(), ("agentsec",))
     data = text.encode("utf-8", "surrogatepass") if isinstance(text, str) else text
     limit = scanner.cfg.inject.max_bytes if max_bytes is None else max_bytes
-    if limit < 1:
-        raise UsageError("max_bytes must be positive")
-    truncated = len(data) > limit
-    if truncated:
-        data = data[: limit // 2] + b"\n" + data[-(limit - limit // 2) :]
+    scanned, truncated = _injection_input(data, limit)
     # Report fields always reveal (§13); reveal controls whole-input presentation, not findings.
     return scanner._text(
-        data, "<stdin>", None, time_budget_ms, is_inject=True, source_label=source_label, truncated=truncated
+        scanned,
+        "<stdin>",
+        None,
+        time_budget_ms,
+        is_inject=True,
+        source_label=source_label,
+        truncated=truncated,
+        input_size=min(len(data), limit),
     )

@@ -344,6 +344,33 @@ def test_walk_truncation_skips_adapter_and_clean_helpers(tmp_path: Path) -> None
     assert secret.encode() not in pickle.dumps(safe)  # safe IPC envelope
 
 
+def test_injection_cannot_be_hidden_by_nul_minified_or_encoding_seams(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    s = scanner(tmp_path, rule(id="WS-AGT-001", pack="agentsec/injection", exposure_sensitive=False))
+    monkeypatch.setattr(api, "_scanner", lambda *args: s)
+    assert api.scan_injection(b"\0DANGER", source_label="fixture").findings
+    assert api.scan_injection("x" * 30000 + "DANGER", source_label="fixture", max_bytes=40000).findings
+    data = ("padding" * 30 + "DANGER").encode("utf-16")
+    result = api.scan_injection(data, source_label="fixture", max_bytes=30)
+    assert result.findings and result.stats.truncated and result.stats.bytes_scanned == 30
+    unicode_scanner = scanner(
+        tmp_path,
+        rule(
+            id="WS-AGT-002",
+            pack="agentsec/injection",
+            applies_to={"kind": "doc", "max_bytes": 18},
+            match={"unicode": {"classes": ["ZW"]}},
+        ),
+    )
+    monkeypatch.setattr(api, "_scanner", lambda *args: unicode_scanner)
+    result = api.scan_injection("é" * 100 + "payload\u200b", source_label="fixture", max_bytes=18)
+    assert result.findings and result.stats.bytes_scanned == 18
+    assert "[ZWSP]" in result.findings[0].snippet
+    assert api._injection_input(b"\xff" * 40, 10)[1]
+
+
 def test_partial_internal_result_and_private_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from whalescan.errors import InternalError, RuleError
 
