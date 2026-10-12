@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -134,6 +135,36 @@ def test_source_order_and_yaml_formatting_do_not_change_content_hash(tree: Path)
     raw = default_yaml_loader(pack.read_text())[0]
     pack.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
     assert json.loads(builder.compile_bundle(tree))["bundle_hash"] == first["bundle_hash"]
+
+
+def test_bundle_checkout_preserves_lf_with_autocrlf(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("git is required to exercise checkout line endings")
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    shutil.copyfile(ROOT / ".gitattributes", repository / ".gitattributes")
+    for target in builder.TARGETS:
+        destination = repository / target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / target).read_bytes())
+
+    def run(*args: str) -> None:
+        subprocess.run(
+            [git, "-c", "core.autocrlf=true", "-C", str(repository), *args],
+            capture_output=True,
+            check=True,
+        )
+
+    run("init")
+    run("add", ".gitattributes", *builder.TARGETS)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    run("checkout-index", "--all", "--prefix=" + checkout.as_posix() + "/")
+    for target in builder.TARGETS:
+        data = (checkout / target).read_bytes()
+        assert data == (ROOT / target).read_bytes()
+        assert b"\r" not in data and data.endswith(b"\n")
 
 
 def test_checked_in_bundle_is_reproducible() -> None:
