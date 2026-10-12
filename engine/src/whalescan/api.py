@@ -631,6 +631,7 @@ class Scanner:
         )
         scan_result.run.exit_code = scan_result.exit_code(self.cfg.scan.fail_on)
         scan_result.run._profile = timings
+        scan_result.run._sweep = redactor.sweep
         error_type = next((r.error_type for r in results if r.error_type), None)
         if error_type:
             scan_result.run.error = {"type": error_type, "message": "matcher failed; partial scan"}

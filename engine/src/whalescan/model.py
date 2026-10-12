@@ -7,7 +7,7 @@ reporters and the public API. Keep it dependency-free and stable.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Literal
@@ -383,6 +383,8 @@ class RunInfo:
     tool_version: str = ""
     rules_hash: str = ""
     _profile: dict[str, tuple[float, int]] = field(default_factory=dict, repr=False)
+    # Parent-run output sweep; omitted by to_dict and never sent to process workers.
+    _sweep: Callable[[str], str] | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {

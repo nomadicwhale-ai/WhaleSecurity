@@ -207,6 +207,9 @@ def test_redaction_dedupe_metadata_and_cross_file(tmp_path: Path) -> None:
     for output in (r.to_json(), r.to_jsonl(), r.to_sarif(), r.to_markdown(), r.to_text()):
         assert value not in output
     assert "sha256:" in r.findings[0].snippet
+    assert r.run._sweep is not None
+    assert value not in r.run._sweep("reason includes " + value)
+    assert "_sweep" not in r.to_json()
     example = s.scan_text("TOKEN=" + value, filename=".env.example")
     assert str(example.findings[0].confidence) == "low"
     allowed = scanner(tmp_path, secret_rule(), **{"secrets.allow_values": [value]})
