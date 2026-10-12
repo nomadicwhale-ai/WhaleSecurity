@@ -49,14 +49,22 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 
 
 def default_cache_dir(env: Mapping[str, str] | None = None) -> str:
-    """`$WHALESCAN_CACHE_DIR`, else `$XDG_CACHE_HOME/whalescan`, else `~/.cache/whalescan`."""
+    """Explicit cache/XDG override, else per-user LOCALAPPDATA on Windows or ~/.cache on POSIX."""
     env = os.environ if env is None else env
     explicit = env.get("WHALESCAN_CACHE_DIR", "").strip()
     if explicit:
         return os.path.expanduser(explicit)
     base = env.get("XDG_CACHE_HOME", "").strip()
     if not base or not os.path.isabs(base):  # XDG: relative values are invalid and ignored
-        base = os.path.join(os.path.expanduser("~"), ".cache")
+        if os.name == "nt":
+            base = env.get("LOCALAPPDATA", "").strip()
+            if not base or not os.path.isabs(base):
+                profile = env.get("USERPROFILE", "").strip()
+                if not profile or not os.path.isabs(profile):
+                    profile = os.path.expanduser("~")
+                base = os.path.join(profile, "AppData", "Local")
+        else:
+            base = os.path.join(os.path.expanduser("~"), ".cache")
     return os.path.join(base, "whalescan")
 
 

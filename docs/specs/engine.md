@@ -1285,8 +1285,12 @@ normalized, validated rule set, the applicability index and the keyword tables a
 cache dir must not become a code-execution vector. Key: `sha256(engine_version | schema_version | sorted (relpath,
 sha256(file)) of every rule source | rule-affecting config)`. File: `<cache>/rules-<key[:16]>.json`, written
 atomically (tmp + `os.replace`), mode 0600 in a 0700 dir on POSIX; the newest 5 are kept. Windows mode bits
-are synthetic, not ACL permissions: the configured cache directory must be protected by its user's ACLs.
-Windows retains regular-file, symlink and available ownership checks; failures remain cache misses.
+are synthetic, not ACL permissions: the default is per-user `%LOCALAPPDATA%\whalescan` (fallback
+`%USERPROFILE%\AppData\Local\whalescan`). Explicit `cache.dir`, `WHALESCAN_CACHE_DIR` and `XDG_CACHE_HOME`
+overrides are trusted locations: especially outside the user profile, other writers could tamper with normalized
+rules or cause denial of service. Restrict the directory's ACLs to the user or disable caching (`cache.enabled=false`
+or `WHALESCAN_NO_CACHE=1`); the stdlib cannot verify Windows ACLs. Regular-file, symlink and available ownership
+checks still apply; failures remain cache misses.
 Built-in rules load from the release-time `bundle.json`, so the hook path never parses YAML. Regexes compile lazily per process on the first file
 where the rule is active (`re.Pattern` pickles as source anyway), so a single-file hook compiles only its ~20–40
 applicable rules.

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import ntpath
 import os
+import posixpath
 import stat
 import time
 from types import SimpleNamespace
@@ -13,6 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from whalescan import config as config_mod
 from whalescan.rules import cache as C
 from whalescan.rules import loader as LD
 from whalescan.rules.loader import RuleSet
@@ -311,12 +314,31 @@ def test_load_or_build(tmp_path: Any) -> None:
 def test_default_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     home = str(tmp_path / "home")
     monkeypatch.setenv("HOME", home)
-    assert C.default_cache_dir({}) == os.path.join(home, ".cache", "whalescan")
+    monkeypatch.setattr(C, "os", SimpleNamespace(**{**vars(os), "name": "posix", "path": posixpath}))
+    assert C.default_cache_dir({}) == posixpath.join(home, ".cache", "whalescan")
     assert C.default_cache_dir({"XDG_CACHE_HOME": "/xdg"}) == "/xdg/whalescan"
-    assert C.default_cache_dir({"XDG_CACHE_HOME": "relative"}) == os.path.join(home, ".cache", "whalescan")
+    assert C.default_cache_dir({"XDG_CACHE_HOME": "relative"}) == posixpath.join(home, ".cache", "whalescan")
     assert C.default_cache_dir({"WHALESCAN_CACHE_DIR": "/explicit", "XDG_CACHE_HOME": "/xdg"}) == "/explicit"
     monkeypatch.setenv("WHALESCAN_CACHE_DIR", "/from-env")
     assert C.default_cache_dir() == "/from-env"
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"LOCALAPPDATA": r"C:\Users\Ada\AppData\Local"}, r"C:\Users\Ada\AppData\Local\whalescan"),
+    ({}, r"C:\Users\Ada\AppData\Local\whalescan"),
+    ({"LOCALAPPDATA": "relative"}, r"C:\Users\Ada\AppData\Local\whalescan"),
+    ({"XDG_CACHE_HOME": "relative"}, r"C:\Users\Ada\AppData\Local\whalescan"),
+    ({"XDG_CACHE_HOME": r"D:\cache"}, r"D:\cache\whalescan"),
+    ({"WHALESCAN_CACHE_DIR": r"D:\custom"}, r"D:\custom"),
+])
+def test_windows_defaults_are_per_user_in_config_and_rule_cache(monkeypatch, overrides, expected):
+    proxy = SimpleNamespace(**{**vars(os), "name": "nt", "path": ntpath})
+    monkeypatch.setattr(C, "os", proxy)
+    monkeypatch.setattr(config_mod, "os", proxy)
+    env = {"USERPROFILE": r"C:\Users\Ada", "HOME": r"Q:\not-the-profile", **overrides}
+    assert C.default_cache_dir(env) == expected
+    cfg = config_mod.load_config(r"C:\work", project=False, user=False, env=env)
+    assert cfg.cache_path == expected
 
 
 def test_cache_disabled() -> None:

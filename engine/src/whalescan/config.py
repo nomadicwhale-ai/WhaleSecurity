@@ -958,7 +958,17 @@ def user_config_path(env: Mapping[str, str] | None = None) -> str:
 
 def _default_cache_dir(env: Mapping[str, str]) -> str:
     xdg = env.get("XDG_CACHE_HOME", "")
-    base = xdg if xdg and os.path.isabs(xdg) else os.path.join(_home(env), ".cache")
+    if xdg and os.path.isabs(xdg):
+        base = xdg
+    elif os.name == "nt":
+        base = env.get("LOCALAPPDATA", "").strip()
+        if not base or not os.path.isabs(base):
+            profile = env.get("USERPROFILE", "").strip()
+            if not profile or not os.path.isabs(profile):
+                profile = os.path.expanduser("~")
+            base = os.path.join(profile, "AppData", "Local")
+    else:
+        base = os.path.join(_home(env), ".cache")
     return os.path.join(base, "whalescan")
 
 
