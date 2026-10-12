@@ -14,7 +14,8 @@ def main() -> None:
     build = manifest["build-system"]["requires"]
     dev = manifest["project"]["optional-dependencies"]["dev"]
     audit = manifest["project"]["optional-dependencies"]["adapters"]
-    suites = {"test": build + dev, "ci": build + dev + audit, "release": build}
+    release = manifest["project"]["optional-dependencies"]["release"]
+    suites = {"test": build + dev, "ci": build + dev + audit, "release": build + release}
     for name, requirements in suites.items():
         subprocess.run(
             [

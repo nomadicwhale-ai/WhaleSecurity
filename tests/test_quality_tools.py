@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from pathlib import Path
 
 import pytest
 import yaml
+from whalescan._vendor import tomli
 
 from tools.check_dist import check_wheel
 from tools.check_pins import check
@@ -136,6 +138,17 @@ def test_ci_required_check_and_supported_matrix() -> None:
     assert all("continue-on-error" not in job for job in jobs.values())
     assert {item["os"] for item in matrix["include"]} == {"macos-15", "windows-2025"}
     assert "--cov-fail-under=90" in jobs["test"]["steps"][2]["run"]
+
+
+def test_release_tools_are_optional_and_hash_locked() -> None:
+    manifest = tomli.loads((ROOT / "engine/pyproject.toml").read_text())
+    assert manifest["project"]["dependencies"] == []
+    assert set(manifest["project"]["optional-dependencies"]["release"]) == {"build", "twine"}
+    for suite, required in (("release", {"build", "twine"}), ("ci", {"pip-audit"})):
+        lock = (ROOT / "requirements" / f"{suite}.txt").read_text()
+        entries = re.findall(r"(?m)^[a-z][a-z0-9-]*==[^\n]+(?:\n[ \t]+[^\n]+)*", lock)
+        assert required <= {entry.split("==", 1)[0] for entry in entries}
+        assert all("--hash=sha256:" in entry for entry in entries)
 
 
 def test_issue_forms_parse_and_require_fields() -> None:
