@@ -616,7 +616,10 @@ def resolve_scalar(raw: str, schema: str = "yaml12", style: str = PLAIN, tag: st
             return raw
         if tag == "!!int":
             return num if isinstance(num, int) else raw
-        return float(num)
+        try:
+            return float(num)
+        except OverflowError:  # a bounded integer scalar can still exceed the float range
+            return raw
     return raw
 
 

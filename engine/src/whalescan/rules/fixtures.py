@@ -27,6 +27,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
+from ..jsonio import preflight
 from .loader import UnreadableFile, read_regular_file, safe_relpath
 
 Polarity = Literal["pos", "neg"]
@@ -154,7 +155,9 @@ def load_sidecar(directory: str, root: str) -> dict[str, dict[str, Any]]:
         return {}
     data = _read_confined(path, root, MAX_SIDECAR_BYTES)
     try:
-        doc = json.loads(decode(data))
+        text = decode(data)
+        preflight(text, max_bytes=MAX_SIDECAR_BYTES)
+        doc = json.loads(text)
     except (ValueError, RecursionError) as exc:
         raise FixtureError(f"{SIDECAR}: invalid JSON: {exc}") from None
     if not isinstance(doc, dict):

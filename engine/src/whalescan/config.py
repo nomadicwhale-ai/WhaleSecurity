@@ -484,13 +484,14 @@ class _Regexes(_List):
 
     def check(self, v: Any) -> list[Any]:
         out = super().check(v)
-        import re
+        from .rules.lint import lint_pattern
 
         for i, pat in enumerate(out):
-            try:
-                re.compile(pat)
-            except re.error as exc:
-                raise ValueError(f"[{i}]: invalid regular expression: {exc}") from None
+            # These exclusions use fullmatch, not finditer: empty matches, DOTALL and a
+            # leading wide repeat are valid. Compilation and repeat ambiguity must be safe.
+            for issue in lint_pattern(pat, context="search"):
+                if issue.is_error and issue.code in {"R1", "R2", "R7"}:
+                    raise ValueError(f"[{i}]: invalid regular expression: {issue}")
         return out
 
 
@@ -701,6 +702,8 @@ def _validate_table(
             continue
         try:
             clean = spec.check(value)
+        except RecursionError:
+            raise _err(layer, dotted, "nesting too deep") from None
         except ValueError as exc:
             raise _err(layer, dotted, str(exc)) from None
         if not layer.trusted and dotted in _CONTAINED_PATHS:
@@ -955,7 +958,17 @@ def user_config_path(env: Mapping[str, str] | None = None) -> str:
 
 def _default_cache_dir(env: Mapping[str, str]) -> str:
     xdg = env.get("XDG_CACHE_HOME", "")
-    base = xdg if xdg and os.path.isabs(xdg) else os.path.join(_home(env), ".cache")
+    if xdg and os.path.isabs(xdg):
+        base = xdg
+    elif os.name == "nt":
+        base = env.get("LOCALAPPDATA", "").strip()
+        if not base or not os.path.isabs(base):
+            profile = env.get("USERPROFILE", "").strip()
+            if not profile or not os.path.isabs(profile):
+                profile = os.path.expanduser("~")
+            base = os.path.join(profile, "AppData", "Local")
+    else:
+        base = os.path.join(_home(env), ".cache")
     return os.path.join(base, "whalescan")
 
 
@@ -988,15 +1001,18 @@ def _truthy(v: str | None) -> bool:
 
 
 def _load_toml(path: str, source: str) -> dict[str, Any]:
+    from .textio import FileTooLargeError, read_file
+
     try:
-        with open(path, "rb") as fh:
-            data = fh.read(MAX_CONFIG_BYTES + 1)
+        # Explicit config and user config may be symlinked; discovery already checks project
+        # containment. Resolve them, then use the descriptor-checked, non-blocking reader.
+        data = read_file(os.path.realpath(path), MAX_CONFIG_BYTES)
     except FileNotFoundError:
         raise ConfigError(f"{source} config file not found: {path}") from None
+    except FileTooLargeError:
+        raise ConfigError(f"{source} config {path} is larger than {MAX_CONFIG_BYTES} bytes") from None
     except OSError as exc:
         raise ConfigError(f"cannot read {source} config {path}: {exc.strerror or exc}") from None
-    if len(data) > MAX_CONFIG_BYTES:
-        raise ConfigError(f"{source} config {path} is larger than {MAX_CONFIG_BYTES} bytes")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -1125,7 +1141,10 @@ def load_config(
         meta.diagnostics.extend(layer.diagnostics)
         if layer.source == "project":
             meta.changes.extend(_project_changes(clean, defaults))
-        _merge(raw, clean)
+        try:
+            _merge(raw, clean)
+        except RecursionError:
+            raise _err(layer, "config", "nesting too deep") from None
         sources.append(layer.path or layer.source)
         if layer.source != "project" and clean.get("cache", {}).get("dir"):
             meta.cache_path = os.path.expanduser(str(clean["cache"]["dir"]))

@@ -378,7 +378,9 @@ relative to `--root`; explicit paths outside the root are reported absolute.
 ### 5.2 Symlink policy
 Default: symlinks (file or directory) are not followed and are counted as `skipped.symlink`. With
 `--follow-symlinks`, a link is followed only if `os.path.realpath(target)` lies inside one of the scan roots;
-directory cycles are cut by a `(st_dev, st_ino)` visited set. Links escaping the roots (a cloned repo's
+directory cycles are cut by a `(st_dev, st_ino)` visited set. A zero inode (Windows `DirEntry.stat`)
+triggers a fresh `os.stat`; if no ID is available, canonical real paths are used, never `(device, 0)`.
+Links escaping the roots (a cloned repo's
 `config -> ~/.aws/credentials`) are always skipped with a `symlink-escape` warning: the scanner MUST NOT read outside
 its roots, since redaction is the second line of defense, not the first.
 
@@ -392,6 +394,17 @@ its roots, since redaction is the second line of defense, not the first.
 | yamlite parse | 2 MiB, depth 64, 200k nodes, 10k alias expansions | `parse-error`; structured rules skip the file |
 
 Files are opened with `O_RDONLY | O_NOFOLLOW` where available and read in one call capped at `max_file_bytes + 1`.
+
+**Parser safety limits.** Extra rule sources (YAML or JSON) share the 2 MiB cap even when supplied as bytes;
+config and ignore readers retain their 1 MiB safety caps and reject special files without blocking. Ignore files
+use at most 20,000 patterns of 4,096 characters each. No separate line-length cutoff discards content: the file
+byte cap also bounds a single line. Explicit/user config symlinks are resolved before the regular-file check.
+Every untrusted JSON reader checks UTF-8 size and at most 64 open arrays/objects before stdlib decoding;
+quoted/escaped delimiters do not count. Bundles, rule caches and baselines are capped at 64 MiB;
+fixture sidecars retain their 256 KiB cap. Limit failures remain `RuleError`, `ConfigError`, `FixtureError`,
+or a cache miss, respectively. Baseline symlinks are resolved before a bounded regular-file read.
+The deterministic Hypothesis campaign in `engine/tests/security/` covers malformed input, safe-subset PyYAML
+agreement, and these boundaries; killable subprocess tests enforce no-hang budgets for adversarial inputs.
 
 ### 5.4 Binary detection
 `BINARY_EXT`: images (`.png .jpg .jpeg .gif .webp .ico`), `.pdf`, archives (`.zip .gz .tgz .bz2 .xz .zst .7z .jar
@@ -727,7 +740,12 @@ semantics" has two halves: patterns never pass through argv, so a leading `-` is
 | R4 | Minimum width > 0 (`parse(p).getwidth()[0] > 0`) | error |
 | R5 | No `(?s)`/DOTALL in `regex` (use `multiline`) | error |
 | R6 | Unbounded `*`/`+` on `.` or a negated class anywhere should be `{0,N}`, N ≤ 4096 | warning |
-| R7 | No alternation inside an unbounded repeat whose branches share a first character | error |
+| R7 | No ambiguous alternation inside an unbounded repeat, including factored empty branches, nullable bodies and variable bounded repeats that overlap their continuation | error |
+
+R7 respects Unicode case-insensitive matching and category/range intersections; analysis that cannot prove
+branches disjoint within its work budget fails closed. Config `secrets.allow_values` uses the same compilation
+and repeat-ambiguity guards, but permits empty matches, DOTALL and leading wide repeats because it uses
+`fullmatch`, not `finditer`. Safety comes from these guards and adversarial testing, not a per-match timeout.
 
 ### 8.3 `multiline`
 **`pattern` form:** `finditer` over the whole text with `re.M` (plus `re.S` if flag `s`); a hit is dropped if
@@ -1266,8 +1284,14 @@ The expensive part is YAML parsing, schema validation and lint, not `re.compile`
 normalized, validated rule set, the applicability index and the keyword tables as **JSON**, never pickle: a writable
 cache dir must not become a code-execution vector. Key: `sha256(engine_version | schema_version | sorted (relpath,
 sha256(file)) of every rule source | rule-affecting config)`. File: `<cache>/rules-<key[:16]>.json`, written
-atomically (tmp + `os.replace`), mode 0600 in a 0700 dir; the newest 5 are kept. Built-in rules load from the
-release-time `bundle.json`, so the hook path never parses YAML. Regexes compile lazily per process on the first file
+atomically (tmp + `os.replace`), mode 0600 in a 0700 dir on POSIX; the newest 5 are kept. Windows mode bits
+are synthetic, not ACL permissions: the default is per-user `%LOCALAPPDATA%\whalescan` (fallback
+`%USERPROFILE%\AppData\Local\whalescan`). Explicit `cache.dir`, `WHALESCAN_CACHE_DIR` and `XDG_CACHE_HOME`
+overrides are trusted locations: especially outside the user profile, other writers could tamper with normalized
+rules or cause denial of service. Restrict the directory's ACLs to the user or disable caching (`cache.enabled=false`
+or `WHALESCAN_NO_CACHE=1`); the stdlib cannot verify Windows ACLs. Regular-file, symlink and available ownership
+checks still apply; failures remain cache misses.
+Built-in rules load from the release-time `bundle.json`, so the hook path never parses YAML. Regexes compile lazily per process on the first file
 where the rule is active (`re.Pattern` pickles as source anyway), so a single-file hook compiles only its ~20–40
 applicable rules.
 

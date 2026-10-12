@@ -10,8 +10,9 @@
   ``.gitignore`` files itself;
 * symlinks are never followed by default (``skipped.symlink``); with ``follow_symlinks`` a link is
   followed only when its real path lies inside one of the scan roots, directory cycles are cut by
-  a ``(st_dev, st_ino)`` visited set, and links are processed after the real tree so real paths
-  win. Links that resolve outside the roots always get a ``symlink-escape`` warning;
+  a ``(st_dev, st_ino)`` visited set (canonical paths when no inode is available), and links
+  are processed after the real tree so real paths win. Links that resolve outside the roots
+  always get a ``symlink-escape`` warning;
 * only regular files are yielded (FIFOs, sockets and devices are skipped silently);
   ``max_file_bytes`` skips a file, ``max_files``/``max_total_bytes`` stop enumeration and mark
   the walk truncated.
@@ -34,6 +35,7 @@ import stat
 import sys
 from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, BinaryIO, Literal
@@ -74,6 +76,7 @@ GIT_TIMEOUT_S = 60.0
 MAX_FILES_FROM_BYTES = 64 << 20
 _SKIP_KEYS = ("binary", "too_large", "ignored", "symlink")
 Level = Literal["error", "warning", "info"]
+FileIdentity = tuple[int, int] | str
 
 
 # =========================================================================== data
@@ -144,6 +147,21 @@ def _rel_or_none(path: str, base: str) -> str | None:
 
 def _posix(path: str) -> str:
     return path.replace(os.sep, "/") if os.sep != "/" else path
+
+
+def _identity(path: str, st: os.stat_result, *, follow_symlinks: bool = True) -> FileIdentity:
+    """Never conflate unavailable inode IDs (notably Windows DirEntry.stat's zero).
+
+    A fresh stat normally supplies the real ID. If it cannot, canonical paths still cut
+    symlink cycles without dropping distinct files or directories as false duplicates.
+    """
+    if not st.st_ino:
+        # Enumeration/load will diagnose an unreadable path; identity remains path-based.
+        with suppress(OSError):
+            st = os.stat(path, follow_symlinks=follow_symlinks)
+    if st.st_ino:
+        return st.st_dev, st.st_ino
+    return os.path.normcase(os.path.realpath(path))
 
 
 def _git_env() -> dict[str, str]:
@@ -234,8 +252,8 @@ class Walker:
         self._seen: set[str] = set()
         self._stopped = False
         self._allowed: tuple[str, ...] = ()
-        self._visited: set[tuple[int, int]] = set()
-        self._file_inodes: set[tuple[int, int]] = set()
+        self._visited: set[FileIdentity] = set()
+        self._file_inodes: set[FileIdentity] = set()
         self._deferred: deque[tuple[str, str, IgnoreMatcher, str]] = deque()
 
     # ------------------------------------------------------------------ public state
@@ -471,7 +489,7 @@ class Walker:
         if self.follow:
             try:
                 st = os.stat(a)
-                self._visited.add((st.st_dev, st.st_ino))
+                self._visited.add(_identity(a, st))
             except OSError:
                 pass
         if self.only is not None:
@@ -536,7 +554,7 @@ class Walker:
             self._skip("ignored")
             return
         if self.follow:
-            ino = (st.st_dev, st.st_ino)
+            ino = _identity(abs_path, st, follow_symlinks=False)
             if via_link and ino in self._file_inodes:
                 log.debug("skipping %s: same file already reached through its real path", disp)
                 return
@@ -605,7 +623,7 @@ class Walker:
                         continue
                     if self.follow:
                         st = e.stat(follow_symlinks=False)
-                        ino = (st.st_dev, st.st_ino)
+                        ino = _identity(e.path, st, follow_symlinks=False)
                         if ino in self._visited:
                             continue
                         self._visited.add(ino)
@@ -657,7 +675,7 @@ class Walker:
             self._skip("symlink")  # dangling link or loop
             return
         if stat.S_ISREG(st.st_mode):
-            ino = (st.st_dev, st.st_ino)
+            ino = _identity(real, st)
             if ino in self._file_inodes and not explicit:
                 self._skip("symlink")
                 return
@@ -671,7 +689,7 @@ class Walker:
             if c is not None:
                 yield c
         elif stat.S_ISDIR(st.st_mode):
-            ino = (st.st_dev, st.st_ino)
+            ino = _identity(real, st)
             if ino in self._visited:
                 self._skip("symlink")
                 return
