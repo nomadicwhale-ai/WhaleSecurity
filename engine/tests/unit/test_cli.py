@@ -600,6 +600,24 @@ def test_reveal_out_secret_doc_rule(repo: Path) -> None:
     assert b"FixtureCredential123456" not in proc.stdout + proc.stderr + (repo / "revealed.txt").read_bytes()
 
 
+def test_injection_encoding_nul_and_padding_regressions(repo: Path) -> None:
+    proc = run(repo, "inject", "-f", "json", data=b"\0INJECT")
+    assert proc.returncode == 1
+    assert "[CTRL:U+0000]" in json.loads(proc.stdout)["findings"][0]["snippet"]
+    proc = run(repo, "inject", "--max-bytes", "40000", "-f", "json", data=b"x" * 30000 + b"INJECT")
+    assert proc.returncode == 1
+    proc = run(
+        repo, "inject", "--max-bytes", "30", "-f", "json", data=("padding" * 30 + "INJECT").encode("utf-16")
+    )
+    assert proc.returncode == 1
+    (repo / ".whalesecurity/config.toml").write_text(
+        "schema=1\n[scan]\nmax_stdin_bytes=32\n[inject]\nmax_bytes=18\n", encoding="utf-8"
+    )
+    proc = run(repo, "inject", "-f", "json", data=("é" * 40000 + "payload\u200b").encode())
+    assert proc.returncode == 1 and json.loads(proc.stdout)["stats"]["truncated"]
+    assert json.loads(proc.stdout)["stats"]["bytes_scanned"] == 18
+
+
 def test_baseline_and_cli_metadata_sweep_known_values(repo: Path) -> None:
     value = "FixtureCredential123456"
     proc = run(repo, "baseline", "create", "app.py", "--reason", "accepted " + value)

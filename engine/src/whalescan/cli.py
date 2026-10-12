@@ -264,8 +264,9 @@ def _injection(scanner: "Scanner", data: bytes, args: argparse.Namespace, filena
     limit = scanner.cfg.inject.max_bytes if args.max_bytes is None else args.max_bytes
     if limit < 1:
         raise UsageError("--max-bytes must be positive")
-    truncated = len(data) > limit
-    scanned = data[: limit // 2] + b"\n" + data[-(limit - limit // 2) :] if truncated else data
+    from .api import _injection_input
+
+    scanned, truncated = _injection_input(data, limit)
     result = scanner._text(
         scanned,
         filename,
@@ -274,6 +275,7 @@ def _injection(scanner: "Scanner", data: bytes, args: argparse.Namespace, filena
         is_inject=True,
         source_label=args.source,
         truncated=truncated,
+        input_size=min(len(data), limit),
     )
     if args.reveal_out:
         # Use the parent-run sweep, without matching or parsing the input a second time.
@@ -291,12 +293,21 @@ def _read_inject(limit: int, retain: int) -> tuple[bytes, bool]:
 
     if limit < 1:
         raise UsageError("--max-bytes must be positive")
+    import codecs
+
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    valid_utf8 = True
     head = bytearray()
     tail = b""
     full = bytearray()
     total = 0
     for chunk in iter(lambda: sys.stdin.buffer.read(65536), b""):
         total += len(chunk)
+        if valid_utf8:
+            try:
+                decoder.decode(chunk)
+            except UnicodeDecodeError:
+                valid_utf8 = False
         if len(head) < limit // 2:
             head.extend(chunk[: limit // 2 - len(head)])
         tail = (tail + chunk)[-(limit - limit // 2) :]
@@ -306,6 +317,16 @@ def _read_inject(limit: int, retain: int) -> tuple[bytes, bool]:
             full.clear()
     if total <= retain:
         return bytes(full), False
+    if valid_utf8:
+        try:
+            decoder.decode(b"", final=True)
+        except UnicodeDecodeError:
+            valid_utf8 = False
+    if valid_utf8:
+        # Repair only artificial cut boundaries, never a malformed original stream.
+        return (
+            bytes(head).decode("utf-8", "replace") + "\n" + tail.decode("utf-8", "replace")
+        ).encode(), True
     return bytes(head) + b"\n" + tail, True
 
 
