@@ -7,6 +7,11 @@ severity, suppression, output formats, adapters, performance budgets, public Pyt
 engine can be built and tested without further design decisions. It is normative for v1.0 (MUST/SHOULD/MAY per
 RFC 2119). Deviations from `docs/DESIGN.md` are listed in §19.
 
+> **Target contract, not a current inventory.** Layouts, API exports and CLI examples describe v1.0 requirements;
+> unimplemented paths/commands are not installation instructions. P0-3 Scanner API is merged (#3); P0-4 CLI (#7)
+> remains open. [DESIGN §10](../DESIGN.md#10-roadmap) tracks delivery. AgentSec owns hook trust/view extensions;
+> quality-and-release owns test/eval/release refinements.
+
 **Contents:** 1 Layout · 2 CLI · 3 Configuration · 4 `.whalescanignore` · 5 Walker · 6 Classifier · 7 Rule format ·
 8 Matchers · 9 Dedupe and fingerprints · 10 Severity · 11 Suppressions and baseline · 12 Reporters · 13 Redaction ·
 14 Adapters · 15 Performance · 16 Python API · 17 Errors and exit codes · 18 Logging · 19 Refinements to DESIGN.md
@@ -19,7 +24,7 @@ RFC 2119). Deviations from `docs/DESIGN.md` are listed in §19.
 engine/
 ├── pyproject.toml
 └── src/whalescan/
-    ├── __init__.py  __main__.py   public API re-exports (§16), __version__; `python -m whalescan`
+    ├── __init__.py  __main__.py   target public API re-exports (§16), __version__; `python -m whalescan`
     ├── cli.py               argparse tree, dispatch, exit-code mapping (§2, §17)
     ├── api.py               Scanner, module-level scan_text / scan_injection with a cached scanner
     ├── model.py             frozen dataclasses: Rule, Hit, Finding, FileCtx, ScanResult, Diagnostic
@@ -144,7 +149,7 @@ Both print `kept N · pruned M · added K`.
 
 ### 2.5 `mcp pin | verify`
 ```bash
-whalescan mcp pin    [--mcp-config PATH]... [--server NAME]... [--pins PATH] [--live] [--from-json PATH|-] [--timeout-s 10]
+whalescan mcp pin    [--mcp-config PATH]... [--server NAME]... [--pins PATH] [--force] [--live] [--from-json PATH|-] [--timeout-s 10]
 whalescan mcp verify [same options] [-f FORMAT] [--fail-on SEV] [--strict]
 ```
 - **Servers** come from the `mcpServers` object of each `mcp.config_files` entry (default `.mcp.json`,
@@ -164,9 +169,13 @@ whalescan mcp verify [same options] [-f FORMAT] [--fail-on SEV] [--strict]
  "servers": {"jira": {"source": ".mcp.json", "transport": "stdio", "config_sha256": "<64 hex>",
    "tools": {"get_issue": {"sha256": "<64 hex>", "description_chars": 412}}, "pinned_at": "2026-09-29T10:00:00Z"}}}
 ```
-`verify` reports through `builtin: mcp_drift` rules in `rules/agentsec/mcp.yaml`, located at the server entry in the
-config file. It also runs the agentsec pack over every added or changed description (`source_label=mcp:<server>/<tool>`).
-An unreachable server in `--live` mode yields an `mcp-unreachable` diagnostic, or exit 3 with `--strict`.
+`pin` requires explicit user approval and MUST refuse to overwrite existing pins without `--force`; verification
+never updates pins. `verify` reports through `builtin: mcp_drift` rules in `rules/agentsec/mcp.yaml`, located at the
+server entry in the config file. With a complete trusted listing, it runs the agentsec pack over every added or
+changed description/schema (`source_label=mcp-desc:<server>/<tool>`). Config-only mode MUST NOT claim tool metadata
+was verified. Tool drift/add/remove checks require a complete listing; unavailable metadata is a diagnostic, not a
+removed tool. `properties.diff` is available only with previous trusted metadata, not from a stored hash alone
+(AgentSec §11.5). An unreachable server in `--live` mode yields `mcp-unreachable`, or exit 3 with `--strict`.
 
 | Rule | Condition | Severity |
 |---|---|---|
@@ -1227,8 +1236,8 @@ outside fences, so a finding cannot inject HTML or mentions into a PR comment. H
   `min(4, L // 4)` chars (`AKIA…[sha256:1f3a9c0e]`). L < 16 (typically a password) → `…[REDACTED len=L]` with no
   hash, so short secrets cannot be dictionary-checked. A multi-line private key keeps its `-----BEGIN … KEY-----`
   header and its body becomes `…[sha256:xxxxxxxx]`.
-- **Applies to:** snippets, `message` interpolation (`{{secret}}` is always redacted), `properties`, all four
-  reporters, logs and adapter raw fields. `baseline.json` stores no text at all.
+- **Applies to:** snippets, `message` interpolation (`{{secret}}` is always redacted), `properties`, all five
+  output formats (text, JSON, JSONL, SARIF, Markdown), logs and adapter raw fields. `baseline.json` stores no text at all.
 - **Sweep:** the run keeps an in-memory set of raw secret values, never serialized. Every output string passes
   through `sweep(text)`, one alternation regex over those values, longest first, as a second line of defense. CI
   asserts that no reporter output, in any format, contains any `pos` fixture secret.

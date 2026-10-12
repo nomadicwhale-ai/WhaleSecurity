@@ -9,6 +9,9 @@ With that, pack files and fixtures can be written without making further design 
 DESIGN.md §4–§5 and on the engine spec (`docs/specs/engine.md` §6–§8). Anything here that changes either document
 is listed in §14.
 
+> **Target catalog, not a current inventory.** Pack/fixture paths and matcher extensions below describe planned
+> v1 work, not files already installed. [DESIGN §10](../DESIGN.md#10-roadmap) tracks implementation and gates.
+
 **Contents:** 1 Packs, notation and shared rules · 2 Kubernetes, Helm, operators (`WS-K8S`) · 3 Dockerfile and
 Compose (`WS-DKR`) · 4 Terraform, Terragrunt, AWS, GCP (`WS-TF`) · 5 CI/CD (`WS-GHA`, `-TKN`, `-FLX`, `-GLC`) ·
 6 Reverse proxies (`WS-WEB-PRX`) · 7 FastAPI (`WS-API`) · 8 Airflow (`WS-AIR`) · 9 Spark (`WS-SPK`) · 10 LLM, RAG,
@@ -1060,7 +1063,7 @@ Expected: two hits in `pos.py`, at lines 15 and 21. `neg.py` has zero hits. Ther
 | Rule contract | Every rule has ≥1 `pos*` and ≥1 `neg*` fixture. Every `pos` has an `expect:` annotation on each hit line. `neg` files have zero hits | `tests/fixtures/<ID>/`, `tests/test_rules.py` |
 | Patterns | Every `# patterns:` block is loaded, and each regex is linted (R1–R7) and timed against 100 KB inputs: repeated `a`, spaces, `{`, `/`, `$`, `\n`, 100 KB lines of `FROM x`, `location /a {`, `- name: x`, and random printable text. Each run must stay under 50 ms | `tests/test_redos.py` |
 | Scanner pitfalls | The 11 `on:` forms (§5.1); yaml11 `privileged: yes` and `hostNetwork: on`; compose `22:22` ports (a yaml12 string); Helm `{{- if }}` lines; hcl heredoc and `jsonencode` policies; `.tf.json`; a Dockerfile with `USER` in a builder stage only; CRLF line endings | `tests/fixtures/_regress/`, `tests/test_regressions.py` |
-| Precision corpus | Pinned-SHA clones of public Helm charts, `terraform-aws-modules`, Airflow example DAGs, FastAPI templates and ccxt examples. The false-positive rate per domain pack must stay below 5% (DESIGN §9) | `evals/corpus/`, `evals/run_eval.py` |
+| Precision corpus | Pinned-SHA clones of public Helm charts, `terraform-aws-modules`, Airflow example DAGs, FastAPI templates and ccxt examples. Clean FDR FP/(TP+FP) per domain pack MUST stay below 5% on `clean-holdout` (quality-and-release §5) | `evals/corpus/`, `evals/run_eval.py` |
 | Verifier hand-off | Rules with `Conf L`, and FP guards that say "the verifier checks", emit `props.verify_hint` naming the cross-file fact to confirm (for example `LimitRange`, `allow-snippet-annotations`, a gateway risk module) | `agents/finding-verifier.md` |
 
 ---
@@ -1077,7 +1080,7 @@ Expected: two hits in `pos.py`, at lines 15 and 21. `neg.py` has zero hits. Ther
    Compose. The pack file names `fastapi.yaml`, `airflow.yaml`, `spark.yaml`, `llm-rag.yaml` and `trading.yaml` are as
    DESIGN §3 lists them.
 4. **Budget.** DESIGN §5 estimates about 65 rules for these packs. This catalog has 180: 166 core and 14 marked †
-   (`tags: [ext]`). The v1 total becomes about 265. The P3 exit criterion counts core rules only, and † rules may slip
+   (`tags: [ext]`). With 81 appsec/secrets and 41 AgentSec rules, the total is 302 IDs (288 core + 14 extensions). The P3 exit criterion counts core rules only, and † rules may slip
    to v1.1 with the same IDs.
 5. **New py_ast source sets.** `k8s_cr` covers the parameters `spec`, `body`, `meta`, `status`, `old`, `new`, `diff`
    and `patch` of functions decorated with `@kopf.on.*`, `@kopf.timer` or `@kopf.daemon`. `tool_args` covers the

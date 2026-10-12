@@ -10,8 +10,8 @@ It is built on a deterministic, tested engine (`whalescan`). Claude Code skills,
 > **Status:** engine core, Scanner API and CLI implemented; seed rules next. See [TODO.md](TODO.md) for what's done and what's next.
 
 ## Documentation
-- [docs/DESIGN.md](docs/DESIGN.md): architecture and roadmap
+- [docs/DESIGN.md](docs/DESIGN.md): architecture, status-based roadmap and measurable release gates
 - [docs/specs/engine.md](docs/specs/engine.md): engine specification
 - [docs/specs/rules-appsec-secrets.md](docs/specs/rules-appsec-secrets.md) and [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): rule catalogs
-- [docs/specs/agentsec.md](docs/specs/agentsec.md): prompt-injection defense (draft)
+- [docs/specs/agentsec.md](docs/specs/agentsec.md): complete v1.0 prompt-injection defense specification (implementation planned)
 - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): testing, evals and release

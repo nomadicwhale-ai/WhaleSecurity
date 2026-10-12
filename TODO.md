@@ -11,7 +11,9 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
   - [docs/specs/rules-appsec-secrets.md](docs/specs/rules-appsec-secrets.md): appsec + secrets rule catalog.
   - [docs/specs/rules-infra-domain.md](docs/specs/rules-infra-domain.md): k8s, Docker, Terraform, CI/CD, proxies, FastAPI, Airflow, Spark, LLM and trading rule catalog.
   - [docs/specs/quality-and-release.md](docs/specs/quality-and-release.md): tests, evals, CI and release.
-- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,921 unit tests passing**, ruff clean.
+  - [docs/specs/agentsec.md](docs/specs/agentsec.md): complete v1.0 target contract; rule packs, hooks and evals remain planned (see [DESIGN §10](docs/DESIGN.md#10-roadmap)).
+- **Engine `whalescan`:** under `engine/src/whalescan`, stdlib-only, **1,953 unit tests passed, 3 skipped** (CPython 3.12, `main` at `d90a964`); ruff and mypy clean.
+  - P0-1 pipeline modules, P0-2 reporters (text, JSON/JSONL, SARIF, Markdown) and output schemas, and P0-3 Scanner API are merged to `main` (#1, #2, #3).
   - Contract: `model.py`, `errors.py`, `matchers/base.py`. Base provides combinators `all`, `any`, `not` and `near_lines`.
   - Config: `config.py` with discovery, precedence, the trust boundary for untrusted project config, and validation. It vendors `_vendor/tomli` for Python 3.10.
   - File handling:
@@ -33,9 +35,7 @@ Last updated: 2026-09-29. Use this file to pick up work: finish the items in ord
     - `entropy.py`: Shannon entropy with context and placeholder guards.
 
 ### Incomplete
-- [docs/specs/agentsec.md](docs/specs/agentsec.md): the draft stops mid-way (look for `<!-- CONTINUE -->`).
 - `docs/specs/claude-plugin.md`: not written. The verified Claude Code plugin, skill, agent and hook format facts are summarized under P1 below.
-- Engine: `mypy src` reports 10 errors, all in `model.py`. They come from the lazy calls to `whalescan.report.*`, which don't exist yet. The P0 items below fix this.
 
 ## Dev setup
 
@@ -54,7 +54,7 @@ cd engine && ruff check src tests && mypy src && pytest -q
   - `suppress.py`: inline markers with a required reason and `until=`; the baseline file with create, update and prune; hard exclusions for `inject` and `WS-AGT` in agent-config and doc files.
   - `redact.py`: redaction formats by length, keeping the PEM header, a sweep of known secrets, then reveal.
   - `log.py`: logging with a redacting filter.
-- [x] **P0-2 Reporters** (done: text, json/jsonl, sarif, markdown, 4 JSON schemas, 24 tests; SARIF validated against the official schema) (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Validate the output against the schemas in tests. This also clears the mypy errors in `model.py`.
+- [x] **P0-2 Reporters** (done: text, json/jsonl, sarif, markdown, 4 JSON schemas, 24 tests; SARIF validated against the official schema) (spec §12): `report/text.py`, `json.py` (report envelope and jsonl), `sarif.py` (follow the SARIF 2.1.0 mapping table exactly), `markdown.py` (escaping, fence length), and `report/schemas/*.json`. Output schemas are validated in tests; the mypy errors in `model.py` are cleared.
 - [x] **P0-3 API** (spec §16): `api.py` with a `Scanner` that runs walker → classify → applicability index → keyword prefilter → `evaluate` → filters → findings → dedupe → suppress → sort. Also module-level cached `scan_text` and `scan_injection` for hooks. Add a process pool above 200 files (§15.3) and the time budget (§15.4).
 - [x] **P0-4 CLI** (spec §2, §17):
   - Commands: `scan`, `inject`, `secrets`, `baseline create/update`, `rules list/test/explain` (including `--redos`) and `version`.
@@ -71,10 +71,10 @@ cd engine && ruff check src tests && mypy src && pytest -q
 - [ ] **P0-7 CI:** `.github/workflows/ci.yml` running ruff, mypy, pytest on Python 3.10–3.13, `rules test --redos`, and a self-scan. Pin actions by SHA and use `permissions: read-all`.
 
 ### Specs: finish and review (cheap, can run in parallel with P0)
-- [ ] Finish `docs/specs/agentsec.md`: the rest of the WS-AGT catalog, `mcp_verify` hashing and storage, and 15 or more red-team scenarios.
+- [x] Finish `docs/specs/agentsec.md`: 41 WS-AGT rules, hook/state decisions, MCP hashing/storage and 26 red-team scenarios; implementation and measured evals are separate roadmap gates.
 - [ ] Write `docs/specs/claude-plugin.md` using the format facts in P1.
 - [ ] Compile and test every regex in the three rule catalogs: each must have a positive and a near-miss negative sample, and run in under 50 ms on 100 KB of adversarial input.
-- [ ] Write `docs/ROADMAP.md` from the specs: an issue-ready backlog with IDs, dependencies and acceptance criteria.
+- [ ] Write `docs/ROADMAP.md` (planned, not yet present) from the specs: an issue-ready backlog with IDs, dependencies and acceptance criteria; current status-based phases and release metrics are in [DESIGN §10](docs/DESIGN.md#10-roadmap).
 
 ### P1: Claude Code plugin and CI surface (target v0.5)
 - [ ] `.claude-plugin/plugin.json`:
@@ -102,7 +102,7 @@ cd engine && ruff check src tests && mypy src && pytest -q
 
 ### P3: depth (target v0.9)
 - [ ] Matchers: `yamlpath.py` (path grammar, promotion for `on:`, predicates, yaml11 vs yaml12 values), `pyast.py` (function-local taint, source sets, `fastapi_route`), and `hcl.py` with `hcllite.py`.
-- [ ] Rule packs: implement the full catalogs (about 150 rules), each with pos/neg fixtures.
+- [ ] Rule packs: implement the full catalogs (288 core rules; 14 domain extensions may defer), each with pos/neg fixtures.
 - [ ] `mcp pin/verify`.
 - [ ] Adapters: semgrep, gitleaks, trivy and osv.
 
