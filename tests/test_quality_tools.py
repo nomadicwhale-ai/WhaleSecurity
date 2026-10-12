@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import zipfile
 from pathlib import Path
 
@@ -48,6 +49,37 @@ def test_stdlib_gate_accepts_relative_imports_and_guarded_function_extra(tmp_pat
         encoding="utf-8",
     )
     assert not check_imports(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("source", "accepted"),
+    [
+        (
+            "if sys.version_info >= (3, 11):\n    import tomllib\n"
+            "else:\n    from ._vendor import tomli as tomllib\n",
+            True,
+        ),
+        (
+            "def load():\n    if sys.version_info >= (3, 11):\n        import tomllib\n"
+            "    else:\n        from ._vendor import tomli as tomllib\n",
+            True,
+        ),
+        ("import tomllib\n", False),
+        ("if sys.version_info >= (3, 10):\n    import tomllib\n", False),
+        ("if sys.version_info >= (3, 11):\n    import requests\n", False),
+        (
+            "if sys.version_info >= (3, 11):\n    import tomllib\nelse:\n    import requests\n",
+            False,
+        ),
+        ("if sys.version_info >= (3, 11):\n    pass\nelse:\n    import tomllib\n", False),
+    ],
+)
+def test_stdlib_gate_recognizes_guarded_tomllib_on_python_310(
+    tmp_path: Path, source: str, accepted: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "stdlib_module_names", sys.stdlib_module_names - {"tomllib"})
+    (tmp_path / "sample.py").write_text(source, encoding="utf-8")
+    assert (not check_imports(tmp_path)) is accepted
 
 
 @pytest.mark.parametrize("dependencies", ["['requests']", "[]", "None"])

@@ -10,21 +10,36 @@ from pathlib import Path
 def check_imports(root: Path) -> list[str]:
     errors = []
     allowed = sys.stdlib_module_names | {"whalescan", "__future__"}
+    tomllib_guard = ast.dump(ast.parse("sys.version_info >= (3, 11)", mode="eval").body)
 
-    def visit(node: ast.AST, path: Path, function: bool = False, guarded: bool = False) -> None:
+    def visit(
+        node: ast.AST,
+        path: Path,
+        function: bool = False,
+        guarded: bool = False,
+        versioned_stdlib: bool = False,
+    ) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             # Defaults and decorators still execute at module scope.
             for child in (*node.decorator_list, node.args, *node.body):
-                visit(child, path, function or child in node.body, False)
+                visit(child, path, function or child in node.body, False, versioned_stdlib)
+            return
+        if isinstance(node, ast.If) and ast.dump(node.test) == tomllib_guard:
+            # tomllib is stdlib in 3.11+, but absent from 3.10's stdlib_module_names.
+            # Permit only that guarded import; still check both branches for dependencies.
+            for child in node.body:
+                visit(child, path, function, guarded, True)
+            for child in node.orelse:
+                visit(child, path, function, guarded, versioned_stdlib)
             return
         if isinstance(node, ast.Try):
             catches_import = any(
                 isinstance(h.type, ast.Name) and h.type.id == "ImportError" for h in node.handlers
             )
             for child in node.body:
-                visit(child, path, function, guarded or (function and catches_import))
+                visit(child, path, function, guarded or (function and catches_import), versioned_stdlib)
             for child in (*node.handlers, *node.orelse, *node.finalbody):
-                visit(child, path, function, guarded)
+                visit(child, path, function, guarded, versioned_stdlib)
             return
         modules = []
         if isinstance(node, ast.Import):
@@ -32,10 +47,14 @@ def check_imports(root: Path) -> list[str]:
         elif isinstance(node, ast.ImportFrom) and node.level == 0:
             modules = [(node.module or "").split(".")[0]]
         for module in modules:
-            if module not in allowed and not (function and guarded):
+            if (
+                module not in allowed
+                and not (function and guarded)
+                and not (module == "tomllib" and versioned_stdlib)
+            ):
                 errors.append(f"{path}:{getattr(node, 'lineno', 0)}: non-stdlib import: {module}")
         for child in ast.iter_child_nodes(node):
-            visit(child, path, function, guarded)
+            visit(child, path, function, guarded, versioned_stdlib)
 
     for path in sorted(root.rglob("*.py")):
         visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)), path)
