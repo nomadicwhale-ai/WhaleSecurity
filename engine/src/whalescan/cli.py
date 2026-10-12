@@ -234,10 +234,12 @@ def _combine(results: list["ScanResult"], cfg: "Config") -> "ScanResult":
     )
     run = results[0].run
     sweeps = tuple(r.run._sweep for r in results if r.run._sweep is not None)
+
     def sweep(value: str) -> str:
         for finalize in sweeps:
             value = finalize(value)
         return value
+
     run._sweep = sweep
     profile: dict[str, tuple[float, int]] = {}
     for result in results:
@@ -599,11 +601,12 @@ def _reports(result: "ScanResult", args: argparse.Namespace, cfg: "Config") -> N
 def _baseline(args: argparse.Namespace, cfg: "Config", result: "ScanResult") -> int:
     from . import __version__
     from .errors import UsageError
-    from .suppress import Baseline
     from .matchers.unicode import reveal
+    from .suppress import Baseline
 
     def clean(value: str) -> str:
         return reveal(result.run._sweep(value) if result.run._sweep is not None else value)
+
     reason = clean(args.reason) if args.reason is not None else None
     path = cfg.resolve_path(
         args.baseline_out or args.baseline or cfg.scan.baseline or ".whalesecurity/baseline.json"
@@ -901,8 +904,11 @@ def main(argv: list[str] | None = None) -> int:
             code = 3
         result.run.exit_code = code
         from .matchers.unicode import reveal
-        result.run.argv = [reveal(result.run._sweep(arg) if result.run._sweep is not None else arg)
-                           for arg in (sys.argv[1:] if argv is None else argv)]
+
+        result.run.argv = [
+            reveal(result.run._sweep(arg) if result.run._sweep is not None else arg)
+            for arg in (sys.argv[1:] if argv is None else argv)
+        ]
         _reports(result, args, cfg)
         if args.profile:
             print("profile: top rules by cumulative matching time", file=sys.stderr)
