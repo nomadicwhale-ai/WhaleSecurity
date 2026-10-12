@@ -369,6 +369,7 @@ def test_exit_three_json_sarif_and_no_secret(repo: Path) -> None:
             assert not doc["runs"][0]["invocations"][0]["executionSuccessful"]
         else:
             assert doc["run"]["exit_code"] == 3
+            assert doc["run"]["error"]["type"] == "AdapterError"
         assert b"FixtureCredential123456" not in proc.stdout + proc.stderr
 
 
@@ -601,6 +602,7 @@ def test_reveal_out_secret_doc_rule(repo: Path) -> None:
 
 
 def test_injection_encoding_nul_and_padding_regressions(repo: Path) -> None:
+    assert run(repo, "inject", "-f", "json", data=b"\xffINJECT").returncode == 1
     proc = run(repo, "inject", "-f", "json", data=b"\0INJECT")
     assert proc.returncode == 1
     assert "[CTRL:U+0000]" in json.loads(proc.stdout)["findings"][0]["snippet"]
@@ -616,6 +618,20 @@ def test_injection_encoding_nul_and_padding_regressions(repo: Path) -> None:
     proc = run(repo, "inject", "-f", "json", data=("é" * 40000 + "payload\u200b").encode())
     assert proc.returncode == 1 and json.loads(proc.stdout)["stats"]["truncated"]
     assert json.loads(proc.stdout)["stats"]["bytes_scanned"] == 18
+
+
+@pytest.mark.parametrize("fmt", ["json", "sarif"])
+def test_output_io_failure_still_has_one_valid_document(repo: Path, fmt: str) -> None:
+    for options in (["--also", "markdown=missing/report.md"], ["-o", "missing/report.json"]):
+        proc = run(repo, "scan", "app.py", "-f", fmt, *options)
+        assert proc.returncode == 3
+        doc = json.loads(proc.stdout)
+        if fmt == "json":
+            assert doc["run"]["exit_code"] == 3 and doc["run"]["error"]
+            assert doc["findings"]
+        else:
+            assert not doc["runs"][0]["invocations"][0]["executionSuccessful"]
+        assert b"FixtureCredential123456" not in proc.stdout + proc.stderr
 
 
 def test_baseline_and_cli_metadata_sweep_known_values(repo: Path) -> None:

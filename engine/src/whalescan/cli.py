@@ -597,7 +597,8 @@ def _reports(result: "ScanResult", args: argparse.Namespace, cfg: "Config") -> N
         result.run.started_at, result.run.duration_ms = "", 0
     color = getattr(args, "color", "auto")
     colored = color == "always" or (color == "auto" and "NO_COLOR" not in os.environ and sys.stdout.isatty())
-    for fmt, path in outputs:
+    # Complete file writes before stdout, so an --also I/O error cannot concatenate two JSON documents.
+    for fmt, path in sorted(outputs, key=lambda item: item[1] == "-"):
         if fmt == "json":
             output = json.render(result, include_suppressed=args.show_suppressed)
         elif fmt == "jsonl":
@@ -923,6 +924,7 @@ def main(argv: list[str] | None = None) -> int:
             d.code in ("adapter-missing", "adapter-failed") for d in result.diagnostics
         ):
             code = 3
+            result.run.error = {"type": "AdapterError", "message": "required adapter unavailable or failed"}
         result.run.exit_code = code
         from .matchers.unicode import reveal
 
@@ -961,10 +963,17 @@ def main(argv: list[str] | None = None) -> int:
             if result.run.error is None:
                 result.run.error = {"type": type(exc).__name__, "message": "operation failed (see stderr)"}
             result.run.exit_code = 3
-            import contextlib
-
-            with contextlib.suppress(OSError, WhalescanError):
+            try:
                 _reports(result, args, cfg or Config.default())
+            except Exception:
+                # The requested report path may itself be the failure. Keep stdout machine-readable.
+                fallback = argparse.Namespace(**{**vars(args), "output": "-", "also": []})
+                try:
+                    _reports(result, fallback, cfg or Config.default())
+                except BrokenPipeError:
+                    sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+                except Exception:  # noqa: S110 -- primary error is reported below without unsafe details
+                    pass  # Never let a reporter failure escape the exit-code boundary.
         # Exception strings can contain raw match text; don't print arbitrary exception messages.
         if code == 3:
             print(f"whalescan: internal error: {type(exc).__name__} (rerun with -vv)", file=sys.stderr)
