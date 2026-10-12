@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .api import Scanner, load_rules, scan_injection, scan_text
+    from .config import load_config
+    from .errors import ConfigError, RuleError, UsageError, WhalescanError
+    from .matchers.unicode import reveal
+    from .model import Confidence, Diagnostic, Finding, ScanResult, Severity
+    from .redact import redact_value as redact
+    from .suppress import Baseline
+
 __version__ = "0.1.0.dev0"
 
 __all__ = [
@@ -52,4 +63,6 @@ def __getattr__(name: str) -> object:
     module = modules.get(name)
     if module is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return getattr(import_module(f".{module}", __name__), "redact_value" if name == "redact" else name)
+    value = getattr(import_module(f".{module}", __name__), "redact_value" if name == "redact" else name)
+    globals()[name] = value
+    return value

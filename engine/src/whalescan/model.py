@@ -382,6 +382,7 @@ class RunInfo:
     error: dict[str, str] | None = None
     tool_version: str = ""
     rules_hash: str = ""
+    _profile: dict[str, tuple[float, int]] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {

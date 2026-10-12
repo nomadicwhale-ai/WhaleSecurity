@@ -52,6 +52,8 @@ def test_public_exports_and_immutable(tmp_path: Path) -> None:
     with pytest.raises(FrozenInstanceError):
         s.cfg = Config.default()  # type: ignore[misc]
     assert s.scan_text("DANGER", filename="app.py").exit_code() == 1
+    assert callable(whalescan.redact)
+    assert "REDACTED" in whalescan.redact("fixture")
 
 
 def test_pipeline_deterministic_threadsafe(tmp_path: Path) -> None:
@@ -337,6 +339,35 @@ def test_walk_truncation_skips_adapter_and_clean_helpers(tmp_path: Path) -> None
     loaded = api.ctx_from_bytes(("TOKEN=" + secret).encode(), "app.py")
     safe = api._scan_file(loaded, scanner(tmp_path, secret_rule()).rules, s.cfg, frozenset(), None)
     assert secret.encode() not in pickle.dumps(safe)  # safe IPC envelope
+
+
+def test_partial_internal_result_and_private_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from whalescan.errors import InternalError, RuleError
+
+    real = api.evaluate
+
+    def fail(expr: object, ctx: object, rule: object) -> object:
+        if rule.id == "WS-INJ-002":
+            raise RuntimeError("sensitive exception text")
+        return real(expr, ctx, rule)
+
+    monkeypatch.setattr(api, "evaluate", fail)
+    with pytest.raises(InternalError) as raised:
+        scanner(tmp_path, rule(), rule(id="WS-INJ-002")).scan_text("DANGER", filename="app.py")
+    result = raised.value.partial_result
+    assert result is not None and len(result.findings) == 1
+    assert result.run.error["type"] == "RuntimeError"
+    assert result.run.exit_code == 3
+    assert "WS-INJ-001" in result.run._profile
+    assert "_profile" not in result.to_json()
+    assert "sensitive exception text" not in result.to_json()
+
+    def invalid(*args: object) -> object:
+        raise RuleError("invalid rule")
+
+    monkeypatch.setattr(api, "evaluate", invalid)
+    with pytest.raises(RuleError):
+        scanner(tmp_path).scan_text("DANGER", filename="app.py")
 
 
 def test_diff_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

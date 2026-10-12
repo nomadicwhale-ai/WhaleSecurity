@@ -11,7 +11,7 @@ import re
 import sys
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -20,12 +20,12 @@ from . import __version__
 from .config import Config, load_config
 from .dedupe import Candidate as Identity
 from .dedupe import dedupe, fingerprints, normalized_snippet
-from .errors import UsageError
+from .errors import InternalError, UsageError
 from .ignore import IgnoreMatcher, any_glob_match
 from .matchers.base import evaluate, leaf_kinds
 from .matchers.regex import compile_pattern
 from .model import Confidence, Diagnostic, Finding, Hit, Rule, RunInfo, ScanResult, Severity, Stats
-from .redact import Redactor, redact_spans
+from .redact import Redactor, redact_spans, redact_value
 from .rules.cache import load_rules as cached_rules
 from .rules.loader import KeywordTable, RuleSet
 from .severity import effective_base, exposure_for, score
@@ -42,6 +42,10 @@ from .walker import (
 from .walker import load as load_file
 
 __all__ = ["Scanner", "load_rules", "scan_injection", "scan_text"]
+
+# Importing the implementation submodule installs `whalescan.redact` as a module. Restore
+# the public function of that name (§16) after its first import, without eager startup imports.
+sys.modules[__package__].__dict__["redact"] = redact_value
 
 
 def load_rules(
@@ -131,6 +135,8 @@ class _FileResult:
     stats: Stats
     path: str
     spans: tuple[tuple[int, int], ...] = ()
+    error_type: str | None = None
+    timings: dict[str, tuple[float, int]] = field(default_factory=dict)
 
 
 def _scan_file(
@@ -172,6 +178,8 @@ def _scan_file(
     redactor = Redactor()
     items: list[tuple[Rule, Hit]] = []
     all_spans: set[tuple[int, int]] = set()
+    error_type = None
+    timings: dict[str, tuple[float, int]] = {}
     for rule in candidates:
         if _expired(deadline):
             stats.truncated = True
@@ -188,7 +196,17 @@ def _scan_file(
         ):
             continue
         stats.rules_evaluated += 1
-        hits = evaluate(rule.match, ctx, replace(rule, max_hits_per_file=1000))
+        began = time.monotonic()
+        try:
+            hits = evaluate(rule.match, ctx, replace(rule, max_hits_per_file=1000))
+        except Exception as exc:
+            from .errors import WhalescanError
+
+            if isinstance(exc, WhalescanError):
+                raise
+            error_type = type(exc).__name__
+            break
+        timings[rule.id] = ((time.monotonic() - began) * 1000, len(hits))
         kept = []
         for hit in hits:
             spans = hit.secret_spans or ([(hit.start, hit.end)] if rule.is_secret_rule else [])
@@ -302,6 +320,8 @@ def _scan_file(
         stats,
         ctx.path,
         tuple(sorted(all_spans)),
+        error_type,
+        timings,
     )
 
 
@@ -509,10 +529,14 @@ class Scanner:
         diagnostics = [*self.cfg.diagnostics, *(w.to_diagnostic() for w in self.rules.warnings), *diagnostics]
         identities = []
         indexes = {}
+        timings: dict[str, tuple[float, int]] = {}
         for result in sorted(results, key=lambda r: r.path):
             identities.extend(result.identities)
             indexes[result.path] = result.markers
             diagnostics.extend(result.diagnostics)
+            for rule_id, (elapsed, hits) in result.timings.items():
+                before = timings.get(rule_id, (0.0, 0))
+                timings[rule_id] = (before[0] + elapsed, before[1] + hits)
             stats.files_scanned += result.stats.files_scanned
             stats.bytes_scanned += result.stats.bytes_scanned
             stats.rules_evaluated += result.stats.rules_evaluated
@@ -606,6 +630,14 @@ class Scanner:
             _gate_findings=gate,
         )
         scan_result.run.exit_code = scan_result.exit_code(self.cfg.scan.fail_on)
+        scan_result.run._profile = timings
+        error_type = next((r.error_type for r in results if r.error_type), None)
+        if error_type:
+            scan_result.run.error = {"type": error_type, "message": "matcher failed; partial scan"}
+            scan_result.run.exit_code = 3
+            error = InternalError("matcher failed; partial scan")
+            error.partial_result = scan_result
+            raise error
         return scan_result
 
 
