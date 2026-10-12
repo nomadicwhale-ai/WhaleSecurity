@@ -1,0 +1,26 @@
+name: False negative
+description: A publicly known technique or vulnerability was not detected
+title: "[FN] "
+body:
+  - type: markdown
+    attributes: {value: "Hook bypasses and unpublished injection techniques MUST go to private reporting (SECURITY.md). Use fake values, WSCANARY- canaries and .invalid hosts only."}
+  - type: input
+    id: family
+    attributes: {label: Family or rule ID}
+    validations: {required: true}
+  - type: textarea
+    id: version
+    attributes: {label: Output of whalescan version -f json, render: json}
+    validations: {required: true}
+  - type: textarea
+    id: sample
+    attributes: {label: Minimal fake or canary sample (becomes pos fixture or holdout variant), render: text}
+    validations: {required: true}
+  - type: dropdown
+    id: severity
+    attributes: {label: Expected severity, options: [info, low, medium, high, critical]}
+    validations: {required: true}
+  - type: textarea
+    id: references
+    attributes: {label: Public references and explanation}
+    validations: {required: true}

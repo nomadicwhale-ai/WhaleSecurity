@@ -606,7 +606,7 @@ def test_load_yaml_and_json_packs_from_a_directory(tmp_path: Any) -> None:
     assert [r.id for r in rs] == ["WS-INJ-001", "WS-INJ-002", "WS-INJ-003", "WS-K8S-001"]
     assert rs.get("WS-INJ-003") is not None
     assert (rs.by_id["WS-K8S-001"].source_file or "").endswith("domain/k8s.yml")
-    assert rs.by_id["WS-INJ-001"].source_file == f"{d}/appsec/injection.yaml"
+    assert rs.by_id["WS-INJ-001"].source_file == (tmp_path / "rules/appsec/injection.yaml").as_posix()
 
 
 def test_multi_document_yaml_pack(tmp_path: Any) -> None:
@@ -626,6 +626,7 @@ def test_multi_document_yaml_pack(tmp_path: Any) -> None:
         ("p.json", '[{"id": "a", "id": "b"}]', "duplicate key"),
         ("p.json", "[NaN]", "invalid JSON constant"),
         ("p.json", "[1,", "invalid JSON"),
+        # A short ID also keeps PYTEST_CURRENT_TEST below Windows' env-var limit.
         pytest.param("p.json", "[" * 100_000 + "]" * 100_000, "JSON", id="deep-json"),
     ],
 )
@@ -652,7 +653,7 @@ def test_rule_errors_carry_the_source_file(tmp_path: Any) -> None:
     with pytest.raises(RuleLoadError) as exc:
         LD.load([str(tmp_path)], builtin=False, yaml_loader=pyyaml_loader)
     (issue,) = exc.value.issues
-    assert issue.source == f"{tmp_path}/x.yaml" and issue.code == "namespace"
+    assert issue.source == (tmp_path / "x.yaml").as_posix() and issue.code == "namespace"
 
 
 def test_missing_directories(tmp_path: Any) -> None:
@@ -1171,7 +1172,12 @@ def test_read_regular_file_checks(tmp_path: Any) -> None:
         LD.read_regular_file(str(path), 2)
     with pytest.raises(LD.UnreadableFile, match="vetoed"):
         LD.read_regular_file(str(path), 10, check=lambda st: "vetoed")
-    with pytest.raises(LD.UnreadableFile, match="not a regular file"):
-        LD.read_regular_file(str(tmp_path), 10)
+    if os.name == "nt":
+        # Windows refuses opening a directory before a descriptor can be type-checked.
+        with pytest.raises(PermissionError):
+            LD.read_regular_file(str(tmp_path), 10)
+    else:
+        with pytest.raises(LD.UnreadableFile, match="not a regular file"):
+            LD.read_regular_file(str(tmp_path), 10)
     with pytest.raises(OSError):
         LD.read_regular_file(str(tmp_path / "missing"), 10)

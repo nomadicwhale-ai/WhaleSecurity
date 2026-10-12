@@ -1,0 +1,42 @@
+name: Rule change or new rule
+description: Propose a detection rule or change its scope
+title: "[Rule] "
+body:
+  - type: markdown
+    attributes: {value: "Use fake samples only. Follow CONTRIBUTING.md and the rule PR checklist; unpublished security techniques belong in private reporting."}
+  - type: input
+    id: namespace
+    attributes: {label: Namespace or existing rule ID}
+    validations: {required: true}
+  - type: input
+    id: title
+    attributes: {label: Rule title}
+    validations: {required: true}
+  - type: dropdown
+    id: severity
+    attributes: {label: Severity, options: [info, low, medium, high, critical]}
+    validations: {required: true}
+  - type: dropdown
+    id: confidence
+    attributes: {label: Confidence, options: [low, medium, high]}
+    validations: {required: true}
+  - type: input
+    id: taxonomy
+    attributes: {label: CWE / OWASP / ATLAS identifiers}
+    validations: {required: true}
+  - type: textarea
+    id: sketch
+    attributes: {label: Detection sketch and scope}
+    validations: {required: true}
+  - type: textarea
+    id: positive
+    attributes: {label: Positive sample with fake values, render: text}
+    validations: {required: true}
+  - type: textarea
+    id: negative
+    attributes: {label: Negative sample and false-positive risks, render: text}
+    validations: {required: true}
+  - type: textarea
+    id: references
+    attributes: {label: HTTPS references}
+    validations: {required: true}

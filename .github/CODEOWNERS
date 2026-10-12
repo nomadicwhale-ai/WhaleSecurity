@@ -1,0 +1,13 @@
+# Sole maintainer; TODO: generate per-rule fixture ownership once rule packs exist (§10.1).
+* @ganbayard
+/engine/ @ganbayard
+/hooks/ @ganbayard
+/skills/ @ganbayard
+/agents/ @ganbayard
+/rules/ @ganbayard
+/tests/fixtures/ @ganbayard
+/tests/golden/expected/ @ganbayard
+/evals/baselines/ @ganbayard
+/evals/labels/ @ganbayard
+/SECURITY.md @ganbayard
+/.github/ @ganbayard

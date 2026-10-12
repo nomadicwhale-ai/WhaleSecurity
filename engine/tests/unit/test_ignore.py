@@ -609,17 +609,17 @@ def test_matches_git_check_ignore(
     (repo / ".gitignore").write_text(text)
     proc = subprocess.run(
         [GIT, "-C", str(repo), "check-ignore", "--no-index", "-v", "-n", "--stdin"],
-        input="\n".join(paths) + "\n",
+        # Binary stdin avoids Windows text-mode CRLF rewriting of queried paths.
+        input=("\n".join(paths) + "\n").encode(),
         capture_output=True,
-        text=True,
         check=False,
         env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull},
     )
     assert proc.returncode in (0, 1), proc.stderr
     git_says: dict[str, bool] = {}
-    for line in proc.stdout.splitlines():
+    for line in proc.stdout.decode().splitlines():
         info, _, path = line.partition("\t")
-        src = info.split(":", 2)[2] if info != "::" else ""
+        src = info.rsplit(":", 2)[2] if info != "::" else ""
         git_says[path] = bool(src) and not src.startswith("!")
     m = IgnoreMatcher(repo, filename=".gitignore", builtin=False, rule_sections=False)
     for p in paths:
