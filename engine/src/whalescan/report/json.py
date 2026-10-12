@@ -32,15 +32,18 @@ def envelope(result: ScanResult) -> dict[str, object]:
     }
 
 
-def render(result: ScanResult) -> str:
+def render(result: ScanResult, *, include_suppressed: bool = True) -> str:
     """One document. Stays valid on an internal error: ``run.error`` carries the partial result."""
-    return _dumps(envelope(result))
+    doc = envelope(result)
+    if not include_suppressed:
+        doc["findings"] = [f.to_dict() for f in ordered(result)]
+    return _dumps(doc)
 
 
-def render_jsonl(result: ScanResult) -> str:
+def render_jsonl(result: ScanResult, *, include_suppressed: bool = True) -> str:
     """One finding@1 per line, no envelope."""
     lines = [
         _json.dumps(clean_obj(f.to_dict()), sort_keys=True, ensure_ascii=False)
-        for f in ordered(result, include_suppressed=True)
+        for f in ordered(result, include_suppressed=include_suppressed)
     ]
     return "\n".join(lines) + ("\n" if lines else "")

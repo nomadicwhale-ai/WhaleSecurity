@@ -78,8 +78,8 @@ def _table(findings: list[Finding]) -> list[str]:
     return rows
 
 
-def render(result: ScanResult, max_findings: int = 200) -> str:
-    findings = ordered(result)
+def render(result: ScanResult, max_findings: int = 200, *, include_suppressed: bool = False) -> str:
+    findings = ordered(result, include_suppressed=include_suppressed)
     counts = severity_counts(findings)
     parts = " · ".join(f"{counts[s]} {s.label}" for s in SEVERITY_ORDER if counts[s])
     out = [f"## whalescan: {parts}" if parts else "## whalescan: no findings", ""]

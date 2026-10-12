@@ -120,8 +120,10 @@ def _result(f: Finding, rule_index: int) -> dict[str, Any]:
     return res
 
 
-def render(result: ScanResult, absolute_root: str | None = None) -> str:
-    findings = ordered(result, include_suppressed=True)
+def render(
+    result: ScanResult, absolute_root: str | None = None, *, include_suppressed: bool = True
+) -> str:
+    findings = ordered(result, include_suppressed=include_suppressed)
     rules: list[dict[str, Any]] = []
     index: dict[str, int] = {}
     results = []

@@ -28,8 +28,8 @@ def _finding(f: Finding, color: bool) -> list[str]:
     return lines
 
 
-def render(result: ScanResult, color: bool = False) -> str:
-    findings = ordered(result)
+def render(result: ScanResult, color: bool = False, *, include_suppressed: bool = False) -> str:
+    findings = ordered(result, include_suppressed=include_suppressed)
     out: list[str] = []
     for f in findings:
         out += _finding(f, color)
