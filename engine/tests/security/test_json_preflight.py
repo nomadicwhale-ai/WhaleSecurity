@@ -86,7 +86,7 @@ def test_utf8_byte_size_boundary_is_exact(text):
 @pytest.mark.parametrize("text", [
     "]" + "[" * 100_000, "[}" + "[" * 100_000,
     '{"x":"escaped\\\"[' + "[" * 100_000 + '","y":' + "[" * 100_000,
-])
+], ids=["unmatched-close", "mismatched-close", "escaped-prefix"])
 def test_malformed_prefixes_cannot_hide_nesting(text):
     with pytest.raises(ValueError, match="JSON"):
         jsonio.preflight(text, max_bytes=2 << 20)

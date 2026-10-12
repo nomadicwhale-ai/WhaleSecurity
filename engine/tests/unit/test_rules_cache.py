@@ -172,7 +172,10 @@ def test_windows_synthetic_modes_allow_cache_hits_and_corrupt_removal(tmp_path, 
     ("posix", 0o600, 7, True), ("posix", 0o666, 7, False),
     ("nt", 0o666, 7, True), ("nt", 0o666, 8, False),
 ])
-def test_private_read_preserves_ownership_and_posix_modes(monkeypatch, platform, mode, uid, accepted):
+@pytest.mark.parametrize("has_nofollow", [False, True])
+def test_private_read_preserves_ownership_and_posix_modes(
+    monkeypatch, platform, mode, uid, accepted, has_nofollow,
+):
     st = os.stat_result((stat.S_IFREG | mode, 1, 1, 1, uid, 7, 0, 0, 0, 0))
 
     def read(path, limit, *, check):
@@ -181,8 +184,12 @@ def test_private_read_preserves_ownership_and_posix_modes(monkeypatch, platform,
             raise LD.UnreadableFile(reason)
         return b"safe JSON"
 
-    proxy = SimpleNamespace(**{**vars(os), "name": platform, "getuid": lambda: 7})
-    monkeypatch.setattr(C, "os", proxy)
+    attributes = {**vars(os), "name": platform, "getuid": lambda: 7, "lstat": lambda path: st}
+    if has_nofollow:
+        attributes["O_NOFOLLOW"] = getattr(os, "O_NOFOLLOW", 0)
+    else:
+        attributes.pop("O_NOFOLLOW", None)
+    monkeypatch.setattr(C, "os", SimpleNamespace(**attributes))
     monkeypatch.setattr(C, "read_regular_file", read)
     assert C._read_private("unused.json") == (b"safe JSON" if accepted else None)
 

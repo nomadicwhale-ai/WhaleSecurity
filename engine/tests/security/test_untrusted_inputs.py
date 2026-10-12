@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
@@ -33,7 +34,13 @@ from whalescan.model import AppliesTo, Confidence, FileCtx, Rule, Severity
 from whalescan.rules import loader
 from whalescan.rules.lint import lint_pattern
 
-FUZZ = settings(max_examples=150, deadline=500, derandomize=True, database=None)
+# Only the killable subprocess campaign opts out of timing individual examples: Windows
+# filesystem/scheduler overhead is not a parser hang. Its enclosing 45s process limit remains.
+FUZZ = settings(
+    max_examples=150,
+    deadline=None if os.environ.get("WHALESCAN_FUZZ_PROCESS_BOUNDED") == "1" else 500,
+    derandomize=True, database=None,
+)
 SCALARS = st.none() | st.booleans() | st.integers(-1_000_000, 1_000_000) | st.text(max_size=64)
 VALUES = st.recursive(
     SCALARS,

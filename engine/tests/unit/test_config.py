@@ -579,8 +579,10 @@ def test_env_errors(env: dict[str, str], tmp_path: Path) -> None:
 def test_xdg_cache_home(tmp_path: Path) -> None:
     e = {"HOME": str(tmp_path), "XDG_CACHE_HOME": str(tmp_path / "xc")}
     assert load_config(tmp_path, env=e).cache_path == str(tmp_path / "xc" / "whalescan")
-    e2 = {"HOME": str(tmp_path), "XDG_CACHE_HOME": "rel"}
-    assert load_config(tmp_path, env=e2).cache_path == str(tmp_path / ".cache" / "whalescan")
+    e2 = {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+          "LOCALAPPDATA": str(tmp_path / "local"), "XDG_CACHE_HOME": "rel"}
+    default = tmp_path / "local" if os.name == "nt" else tmp_path / ".cache"
+    assert load_config(tmp_path, env=e2).cache_path == str(default / "whalescan")
 
 
 def test_resolve_path(env: dict[str, str], repo: Path) -> None:

@@ -188,8 +188,10 @@ def test_max_size_line_text_matchers_finish_within_deadline() -> None:
 def test_fuzz_campaign_has_a_hard_process_deadline() -> None:
     # Hypothesis deadlines detect slow examples but cannot kill a stuck C regex. The complete
     # deterministic campaign also runs under a process deadline to enforce a real no-hang gate.
+    # Per-example deadlines are redundant here and flaky on Windows filesystem operations.
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/security/test_untrusted_inputs.py", "-q"],
         cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=45, check=False,
+        env={**os.environ, "WHALESCAN_FUZZ_PROCESS_BOUNDED": "1"},
     )
     assert result.returncode == 0, result.stdout + result.stderr
