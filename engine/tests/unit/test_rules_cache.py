@@ -127,11 +127,18 @@ def test_loose_directory_permissions_are_tightened(tmp_path: Any) -> None:
     assert stat.S_IMODE(os.stat(d).st_mode) == 0o700
 
 
-def test_windows_synthetic_modes_allow_cache_hits(tmp_path, monkeypatch):
+@pytest.mark.parametrize("corrupt", [
+    None, b"{not json", b"[]", b'{"schema": "other"}', b"\xff\xfe",
+    json.dumps({"schema": C.CACHE_SCHEMA, "key": KEY, "ruleset": {"rules": 5}}).encode(),
+])
+def test_windows_synthetic_modes_allow_cache_hits_and_corrupt_removal(tmp_path, monkeypatch, corrupt):
     cache = C.RuleCache(tmp_path / "cache")
     rs = ruleset()
     path = cache.store(KEY, rs)
     assert path is not None
+    if corrupt is not None:
+        with open(path, "wb") as stream:
+            stream.write(corrupt)
     original_read = C.read_regular_file
 
     def synthetic(st):
@@ -151,7 +158,11 @@ def test_windows_synthetic_modes_allow_cache_hits(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "os", SimpleNamespace(**attributes))
     monkeypatch.setattr(C, "read_regular_file", read)
     back = cache.load(KEY)
-    assert back is not None and back.rules == rs.rules
+    if corrupt is None:
+        assert back is not None and back.rules == rs.rules
+    else:
+        assert back is None
+        assert not os.path.exists(path)
 
 
 @pytest.mark.parametrize("platform,mode,uid,accepted", [

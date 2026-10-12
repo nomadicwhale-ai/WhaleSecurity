@@ -356,10 +356,17 @@ def test_follow_symlinks_inside_roots(links: Path) -> None:
     ]
 
 
-def test_zero_direntry_inodes_preserve_file_and_directory_link_deduplication(links, monkeypatch):
+@pytest.mark.parametrize("links_first", [False, True])
+def test_zero_direntry_inodes_preserve_file_and_directory_link_deduplication(
+    links, monkeypatch, links_first,
+):
     zero_direntry_inodes(monkeypatch)
     w = Walker(cfg_for(links, walker="fs", follow_symlinks=True), root=links)
-    assert paths(w, [links]) == ["real/a.py", "real/sub/b.py"]
+    if links_first:
+        got = paths(w, [links / "link_dir", links / "link_file.py", links / "real"])
+        assert got[:3] == ["link_dir/a.py", "link_dir/sub/b.py", "link_file.py"]
+    else:
+        assert paths(w, [links]) == ["real/a.py", "real/sub/b.py"]
     assert all(not isinstance(identity, tuple) or identity[1] != 0 for identity in w._file_inodes)
 
 
