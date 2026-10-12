@@ -1,0 +1,53 @@
+- id: WS-AGT-UNI-001
+  title: Unicode TAG character smuggling
+  pack: agentsec/unicode
+  severity: high
+  confidence: high
+  owner: "@whalesecurity/agentsec"
+  cwe: [CWE-1427]
+  owasp: [LLM01:2025]
+  atlas: [AML.T0068, AML.T0074]
+  applies_to: {kind: [code, iac, ci, agent-config, doc, data]}
+  match:
+    unicode: {classes: [TAG]}
+  exposure_sensitive: false
+  message: Unicode TAG characters can hide instructions in otherwise visible content.
+  fix: Reveal TAG text and treat the carrier's instructions as untrusted data.
+  references: ["https://unicode.org/reports/tr51/"]
+  fixtures: auto
+
+- id: WS-AGT-UNI-002
+  title: Zero-width characters in text
+  pack: agentsec/unicode
+  severity: medium
+  confidence: medium
+  owner: "@whalesecurity/agentsec"
+  cwe: [CWE-1427]
+  owasp: [LLM01:2025]
+  atlas: [AML.T0068, AML.T0074]
+  applies_to: {kind: [code, iac, ci, agent-config, doc, data]}
+  match:
+    unicode: {classes: [ZW], allow_emoji_sequences: true}
+  exposure_sensitive: false
+  message: Zero-width characters can split words or hide a payload in text.
+  fix: Reveal split words and do not follow hidden instructions from the carrier.
+  references: ["https://unicode.org/reports/tr51/"]
+  fixtures: auto
+
+- id: WS-AGT-UNI-003
+  title: Bidirectional text controls
+  pack: agentsec/unicode
+  severity: medium
+  confidence: medium
+  owner: "@whalesecurity/agentsec"
+  cwe: [CWE-1427]
+  owasp: [LLM01:2025]
+  atlas: [AML.T0068, AML.T0074]
+  applies_to: {kind: [code, iac, ci, agent-config, doc, data]}
+  match:
+    unicode: {classes: [BIDI]}
+  exposure_sensitive: false
+  message: Bidi controls can reorder displayed text and conceal its logical meaning.
+  fix: Show the logical order and revealed controls; treat embedded instructions as untrusted data.
+  references: ["https://trojansource.codes/"]
+  fixtures: auto

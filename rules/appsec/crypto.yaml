@@ -1,0 +1,19 @@
+- id: WS-CRY-005
+  title: TLS certificate or hostname verification disabled
+  pack: appsec/crypto
+  severity: high
+  confidence: high
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-295]
+  owasp: [A02]
+  applies_to: {kind: code, lang: python}
+  keywords: [verify, ssl, cert_reqs, check_hostname, TCPConnector]
+  match:
+    regex: |-
+      \bverify[ \t]{0,16}=[ \t]{0,16}False\b|\bverify_certs[ \t]{0,16}=[ \t]{0,16}False\b|\bssl\._create_unverified_context\(|\b(?:cert_reqs|verify_mode)[ \t]{0,16}=[ \t]{0,16}(?:ssl\.)?CERT_NONE\b|\bcheck_hostname[ \t]{0,16}=[ \t]{0,16}False\b|\bTCPConnector\([^)\n]{0,100}\bssl[ \t]{0,16}=[ \t]{0,16}False
+  filters:
+    line_not_regex: '(?<![A-Za-z0-9])jwt\.decode\('
+  message: TLS certificate or hostname verification is disabled, allowing interception.
+  fix: Keep verification on and trust the private CA using a CA bundle or a configured root pool.
+  references: ["https://cwe.mitre.org/data/definitions/295.html"]
+  fixtures: auto

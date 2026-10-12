@@ -129,19 +129,28 @@ jobs:
           "$RUNNER_TEMP/stdlib/bin/python" -I -c "import importlib.metadata as m; import whalescan; from whalescan import config; from whalescan.report import sarif; assert {d.metadata['Name'] for d in m.distributions()} == {'whalescan'}"
 
   rules:
-    # TODO §8: CLI, bundle regeneration, rule metadata/fixtures, ReDoS, hooks,
-    # golden/redaction contracts, self-scan/SARIF, import-time and smoke eval gates
-    # require the unfinished CLI/rules/hooks/evals. Enable when those land.
-    if: ${{ false }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - run: echo "TODO enable engine-dependent quality gates"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          python-version: ${{ matrix.python }}
+          requirements: requirements/test.txt
+      - name: Reproduce bundle and run rule fixtures with ReDoS checks
+        run: |
+          python tools/build_bundle.py --check
+          whalescan --no-project-config --no-cache rules test --redos
 
   ci-ok:
     if: always()
-    needs: [lint, types, test, build, stdlib-only]
+    needs: [lint, types, test, build, stdlib-only, rules]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}

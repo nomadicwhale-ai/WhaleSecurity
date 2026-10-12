@@ -1,0 +1,4 @@
+# Fixture for WS-AGT-UNI-003. Attack-sample data, not production code.
+Visible logical-order text stays unchanged.
+Hebrew שלום and Arabic سلام contain no bidi controls.
+A literal escape spelling \u202e is not an actual bidi control.

@@ -1,0 +1,61 @@
+- id: WS-INJ-001
+  title: SQL built by string formatting (Python DB-API)
+  pack: appsec/injection
+  severity: high
+  confidence: medium
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-89]
+  owasp: [A03]
+  applies_to: {kind: code, lang: python}
+  keywords: [execute, executemany, executescript, mogrify, read_sql, text, raw, exec_driver_sql]
+  match:
+    all:
+      - regex: |-
+          \b(?:execute|executemany|executescript|mogrify|read_sql(?:_query)?|text|raw|exec_driver_sql)\([ \t]{0,32}(?:(?:[rR][fF]|[fF][rR]?)["'][^"'\n]{0,300}\{|["'][^"'\n]{0,300}["'][ \t]{0,16}(?:%[ \t]{0,16}[\w(]|\+[ \t]{0,16}\w|\.format\())
+      - regex: '(?i)\b(?:select|insert|update|delete|merge|upsert|replace|truncate|drop|alter|with|call)\b'
+    near_lines: 0
+  filters:
+    line_not_regex: '\bsql\.(?:SQL|Identifier|Literal)\('
+  message: SQL built by string formatting can execute untrusted input as a query.
+  fix: Use driver placeholders and pass values separately; build identifiers with psycopg.sql.Identifier or an allowlist.
+  references: ["https://cwe.mitre.org/data/definitions/89.html"]
+  fixtures: auto
+
+- id: WS-INJ-003
+  title: OS command injection (Python subprocess with shell=True)
+  pack: appsec/injection
+  severity: high
+  confidence: high
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-78]
+  owasp: [A03]
+  applies_to: {kind: code, lang: python}
+  keywords: [subprocess, os.system, os.popen, create_subprocess_shell]
+  match:
+    any:
+      - regex: |-
+          \b(?:os\.(?:system|popen)|subprocess\.(?:getoutput|getstatusoutput)|asyncio\.create_subprocess_shell)\((?![ \t]{0,32}["'][^"'\n]{0,500}["'][ \t]{0,16}[,)])[ \t]{0,32}(?!\))
+      - regex: |-
+          \bsubprocess\.(?:run|call|check_call|check_output|Popen)\((?=[^\n]{0,400}\bshell[ \t]{0,16}=[ \t]{0,16}True\b)(?![ \t]{0,32}[rR]?["'][^"'\n]{0,500}["'][ \t]{0,16},)
+  message: A non-constant command passed to a shell can execute untrusted input.
+  fix: Pass an argv list without shell=True and validate inputs against an allowlist.
+  references: ["https://cwe.mitre.org/data/definitions/78.html"]
+  fixtures: auto
+
+- id: WS-INJ-009
+  title: Dynamic code evaluation of non-constant input
+  pack: appsec/injection
+  severity: critical
+  confidence: medium
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-95]
+  owasp: [A03]
+  applies_to: {kind: code, lang: python}
+  keywords: [eval, exec]
+  match:
+    regex: |-
+      (?<![\w.])(?:eval|exec)\((?![ \t]{0,32}(?:["'][^"'\n]{0,500}["'][ \t]{0,16}\)|\)))
+  message: Dynamic code evaluation of non-constant input can execute attacker-controlled code.
+  fix: Use ast.literal_eval or json.loads for data; use a parser or allowlisted operator table for formulas.
+  references: ["https://cwe.mitre.org/data/definitions/95.html"]
+  fixtures: auto

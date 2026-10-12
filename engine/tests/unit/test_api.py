@@ -287,6 +287,11 @@ def test_batches_and_worker_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_load_rules_and_hook_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from whalescan.rules import loader
+
+    empty_bundle = tmp_path / "bundle.json"
+    empty_bundle.write_text(json.dumps({"schema": loader.BUNDLE_SCHEMA, "rules": []}), encoding="utf-8")
+    monkeypatch.setattr(loader, "BUNDLE_PATH", str(empty_bundle))
     packs = tmp_path / "packs"
     packs.mkdir()
     (packs / "rules.json").write_text(json.dumps([rule()]), encoding="utf-8")

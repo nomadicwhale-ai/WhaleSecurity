@@ -1,0 +1,2 @@
+# Fixture for WS-AGT-UNI-002. Attack-sample data; benign 16-symbol run canary.
+run ​‌​‌​‌​‌​‌​‌​‌​‌ # expect: WS-AGT-UNI-002

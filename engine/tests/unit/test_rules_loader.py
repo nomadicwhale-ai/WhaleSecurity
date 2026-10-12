@@ -783,7 +783,7 @@ def test_bundle_roundtrip(tmp_path: Any) -> None:
     direct = LD.load([d], builtin=False, yaml_loader=pyyaml_loader)
     assert rs.bundle_hash == bundle["bundle_hash"] == direct.bundle_hash
     assert [LD.rule_to_dict(r, with_source=False) for r in rs] == [
-        LD.rule_to_dict(r, with_source=False) for r in direct
+        LD.rule_to_dict(r, with_source=False) for r in sorted(direct, key=lambda r: r.id)
     ]
     assert rs.fixture_specs == {"WS-GHA-001": {"pos": ["a/p.yml"], "neg": ["a/n"]}}
     assert rs.by_id["WS-K8S-001"].source_file == "rules/domain/k8s.yaml"

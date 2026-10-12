@@ -1559,7 +1559,8 @@ def load_raw_rules(
 
 
 def build_bundle(
-    rule_dirs: Sequence[str | os.PathLike[str]], *, yaml_loader: YamlLoader | None = None
+    rule_dirs: Sequence[str | os.PathLike[str]], *, yaml_loader: YamlLoader | None = None,
+    yaml_only: bool = False, strict: bool = False,
 ) -> dict[str, Any]:
     """The release-time `bundle.json` document for the given rule directories (fully validated)."""
     sources: list[SourceFile] = []
@@ -1569,13 +1570,17 @@ def build_bundle(
         found, problems = iter_pack_files(base)
         issues += problems
         for path in found:
+            if yaml_only and not path.endswith((".yaml", ".yml")):
+                continue
             rel = os.path.relpath(path, os.path.realpath(base)).replace(os.sep, "/")
             sources.append(SourceFile("builtin", path, f"rules/{rel}", f"builtin:{rel}"))
     raws, _ = read_all(sources, yaml_loader=yaml_loader)
     ruleset = build(raws, extra_issues=issues)
+    if strict and ruleset.warnings:
+        raise RuleLoadError(ruleset.warnings, "rule warnings are errors in release bundles")
     return {
         "schema": BUNDLE_SCHEMA,
         "bundle_hash": ruleset.bundle_hash,
-        "rules": [rule_to_dict(r) for r in ruleset.rules],
+        "rules": [rule_to_dict(r) for r in sorted(ruleset.rules, key=lambda r: r.id)],
         "fixtures": dict(ruleset.fixture_specs),
     }

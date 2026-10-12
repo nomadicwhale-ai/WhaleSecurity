@@ -1,0 +1,2 @@
+# Fixture for WS-AGT-UNI-001. Attack-sample data; benign canary TAG text.
+canary 󠁗󠁓󠁿 # expect: WS-AGT-UNI-001

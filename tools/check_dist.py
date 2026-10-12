@@ -16,7 +16,7 @@ from pathlib import Path
 def check_wheel(path: Path) -> None:
     with zipfile.ZipFile(path) as wheel:
         names = wheel.namelist()
-        required = ["whalescan/py.typed", "whalescan/_vendor/tomli/LICENSE"]
+        required = ["whalescan/py.typed", "whalescan/_vendor/tomli/LICENSE", "whalescan/rules/bundle.json"]
         required += [
             f"whalescan/report/schemas/{name}-1.json"
             for name in ("finding", "report", "baseline", "mcp-pins")
@@ -30,7 +30,16 @@ def check_wheel(path: Path) -> None:
         metadata = email.message_from_bytes(wheel.read(next(n for n in names if n.endswith("/METADATA"))))
         if any("extra ==" not in req for req in metadata.get_all("Requires-Dist", [])):
             raise ValueError("wheel declares a core runtime dependency")
-        # TODO: require rules/bundle.json once the rule bundle is implemented.
+        from whalescan.rules.loader import SourceFile, build, parse_source
+
+        rules = build(
+            parse_source(
+                SourceFile("bundle", "bundle.json", "bundle.json", "bundle"),
+                wheel.read("whalescan/rules/bundle.json"),
+            )
+        )
+        if not rules:
+            raise ValueError("wheel contains an empty rule bundle")
 
 
 def smoke_import(path: Path, *, build_tools: bool = False) -> None:
@@ -56,6 +65,9 @@ def smoke_import(path: Path, *, build_tools: bool = False) -> None:
             [str(python), "-m", "pip", "install", "--no-deps", "--no-build-isolation", str(path.resolve())],
             check=True,
         )
+        # A real positive seed is read by the isolated installed interpreter, not this checkout.
+        fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/WS-INJ-009/pos.py"
+        (root / "positive.py").write_bytes(fixture.read_bytes())
         subprocess.run(
             [
                 str(python),
@@ -64,7 +76,13 @@ def smoke_import(path: Path, *, build_tools: bool = False) -> None:
                 "import importlib.metadata as m; import whalescan; "
                 "from whalescan import config, model; from whalescan.report import sarif; "
                 "assert m.version('whalescan') == whalescan.__version__; "
-                "assert not [r for r in m.requires('whalescan') or [] if 'extra ==' not in r]",
+                "assert not [r for r in m.requires('whalescan') or [] if 'extra ==' not in r]; "
+                "from whalescan import Scanner; from whalescan.config import Config; "
+                "from whalescan.rules.loader import load; "
+                "rules=load(); assert len(rules) >= 15; "
+                "sample=open('positive.py', encoding='utf-8').read(); "
+                "result=Scanner(rules, Config.default()).scan_text(sample, filename='app.py'); "
+                "assert any(f.rule_id == 'WS-INJ-009' for f in result.findings)",
             ],
             cwd=root,
             check=True,
@@ -78,8 +96,11 @@ def main() -> None:
         raise SystemExit("Expected exactly one wheel and one sdist")
     check_wheel(wheels[0])
     with tarfile.open(sdists[0]) as archive:
-        if not any(n.endswith("/pyproject.toml") for n in archive.getnames()):
+        names = archive.getnames()
+        if not any(n.endswith("/pyproject.toml") for n in names):
             raise SystemExit("sdist missing pyproject.toml")
+        if not any(n.endswith("/src/whalescan/rules/bundle.json") for n in names):
+            raise SystemExit("sdist missing built-in rule bundle")
     smoke_import(wheels[0])
     smoke_import(sdists[0], build_tools=True)
 

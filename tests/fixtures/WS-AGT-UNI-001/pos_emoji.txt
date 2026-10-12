@@ -1,0 +1,2 @@
+# Fixture for WS-AGT-UNI-001. Benign emoji flag TAGs remain revealed, never silently dropped.
+flag 🏴󠁧󠁢󠁥󠁮󠁧󠁿 # expect: WS-AGT-UNI-001

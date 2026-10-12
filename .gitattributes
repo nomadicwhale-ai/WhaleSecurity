@@ -4,4 +4,5 @@ tests/golden/** -text
 tests/hooks/cases/** -text
 evals/injection-corpus/** -text linguist-vendored
 evals/smoke/** -text
-**/bundle.json linguist-generated
+# Bundle bytes must remain canonical on Windows checkouts with core.autocrlf=true.
+**/bundle.json text eol=lf linguist-generated

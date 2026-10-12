@@ -109,6 +109,7 @@ def make_wheel(path: Path, *, metadata: str = "", omit: str = "") -> None:
     members = [
         "whalescan/py.typed",
         "whalescan/_vendor/tomli/LICENSE",
+        "whalescan/rules/bundle.json",
         "whalescan-1.0.0.dist-info/licenses/LICENSE",
     ]
     members += [
@@ -117,7 +118,8 @@ def make_wheel(path: Path, *, metadata: str = "", omit: str = "") -> None:
     with zipfile.ZipFile(path, "w") as wheel:
         for name in members:
             if name != omit:
-                wheel.writestr(name, "")
+                data = (ROOT / "engine/src" / name).read_bytes() if name.endswith("bundle.json") else b""
+                wheel.writestr(name, data)
         wheel.writestr("whalescan-1.0.0.dist-info/METADATA", "Name: whalescan\n" + metadata)
 
 
@@ -128,9 +130,10 @@ def test_wheel_metadata_and_required_data(tmp_path: Path) -> None:
     make_wheel(wheel, metadata="Requires-Dist: requests\n")
     with pytest.raises(ValueError, match="runtime dependency"):
         check_wheel(wheel)
-    make_wheel(wheel, omit="whalescan/py.typed")
-    with pytest.raises(ValueError, match="missing"):
-        check_wheel(wheel)
+    for required in ("whalescan/py.typed", "whalescan/rules/bundle.json"):
+        make_wheel(wheel, omit=required)
+        with pytest.raises(ValueError, match="missing"):
+            check_wheel(wheel)
 
 
 def test_workflows_are_pinned_read_only_and_hardened() -> None:
@@ -164,7 +167,10 @@ def test_publication_is_opt_in_and_fails_closed() -> None:
 def test_ci_required_check_and_supported_matrix() -> None:
     workflow = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
     jobs = workflow["jobs"]
-    assert set(jobs["ci-ok"]["needs"]) == {"lint", "types", "test", "build", "stdlib-only"}
+    assert set(jobs["ci-ok"]["needs"]) == {"lint", "types", "test", "build", "stdlib-only", "rules"}
+    assert "--check" in jobs["rules"]["steps"][-1]["run"]
+    assert "rules test --redos" in jobs["rules"]["steps"][-1]["run"]
+    assert jobs["rules"]["strategy"]["matrix"]["python"] == ["3.10", "3.11", "3.12", "3.13", "3.14"]
     matrix = jobs["test"]["strategy"]["matrix"]
     assert matrix["python"] == ["3.10", "3.11", "3.12", "3.13", "3.14"]
     assert all("continue-on-error" not in job for job in jobs.values())
