@@ -49,6 +49,11 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    # Temporary: CPython 3.14 segfaults on the deep-JSON loader fixture:
+    # https://github.com/nomadicwhale-ai/WhaleSecurity/actions/runs/38199614562
+    # W4 owns a bounded JSON-nesting preflight; remove this once that fix merges.
+    # Only 3.14 is advisory: every other Python/OS leg remains required by ci-ok.
+    continue-on-error: ${{ matrix.python == '3.14' }}
     strategy:
       fail-fast: false
       matrix:

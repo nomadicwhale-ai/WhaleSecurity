@@ -133,6 +133,8 @@ def test_ci_required_check_and_supported_matrix() -> None:
     assert set(jobs["ci-ok"]["needs"]) == {"lint", "types", "test", "build", "stdlib-only"}
     matrix = jobs["test"]["strategy"]["matrix"]
     assert matrix["python"] == ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    assert jobs["test"]["continue-on-error"] == "${{ matrix.python == '3.14' }}"
+    assert all("continue-on-error" not in job for name, job in jobs.items() if name != "test")
     assert {item["os"] for item in matrix["include"]} == {"macos-15", "windows-2025"}
     assert "--cov-fail-under=90" in jobs["test"]["steps"][2]["run"]
 

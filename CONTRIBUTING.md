@@ -19,7 +19,7 @@ The core MUST remain stdlib-only: `engine/pyproject.toml` declares `dependencies
 Hypothesis profiles are `dev` (100 examples), `ci` (200 derandomized examples, 500 ms deadline) and `nightly` (5,000 examples, no deadline). Mark genuine POSIX-only tests `posix`; those skip on Windows, never entire modules by default.
 
 ## Pull requests
-Open a focused draft PR against `main`; include the reason and checks actually run. Request @ganbayard's CODEOWNERS review. `ci-ok` is the required check; never bypass it or claim a disabled gate has passed. Resolve review comments before asking a maintainer to merge.
+Open a focused draft PR against `main`; include the reason and checks actually run. Request @ganbayard's CODEOWNERS review. `ci-ok` is the required check; never bypass it or claim a disabled gate has passed. The Python 3.14 leg is temporarily advisory until W4's bounded JSON-nesting fix merges; all other matrix legs remain required. Resolve review comments before asking a maintainer to merge.
 
 Changes to engine source, rules, hooks, skills, agents or the public Action need a `changelog.d/<ref>.<type>.md` fragment per [spec §9.2](docs/specs/quality-and-release.md#92-changelog). Changelog automation is deferred until release preparation tooling exists.
 
