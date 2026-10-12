@@ -1,0 +1,4 @@
+# Fixture for WS-AGT-UNI-001. Attack-sample data, not production code.
+WSCANARY-00000000 is visible ASCII text.
+A literal escape spelling \U000e0057 is not an actual TAG character.
+An ordinary emoji 🐋 is not a TAG sequence.

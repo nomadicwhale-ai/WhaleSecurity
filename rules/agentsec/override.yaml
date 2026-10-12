@@ -1,0 +1,20 @@
+- id: WS-AGT-OVR-001
+  title: Instruction override phrase
+  pack: agentsec/override
+  severity: high
+  confidence: high
+  owner: "@whalesecurity/agentsec"
+  cwe: [CWE-1427]
+  owasp: [LLM01:2025]
+  atlas: [AML.T0051.001, AML.T0054]
+  applies_to: {kind: [code, iac, ci, agent-config, doc, data]}
+  keywords: [ignore, disregard, forget]
+  match:
+    multiline:
+      pattern: '(?i)\b(?:ignore|disregard|forget)\b[^.?!]{0,160}\b(?:previous|prior|above)\b[ \t]{1,16}(?:instructions|rules|system[ \t]{1,16}prompt)\b'
+      max_span_lines: 3
+  exposure_sensitive: false
+  message: Content attempts to override previous instructions or rules.
+  fix: Keep following the user's task, not the carrier's instructions.
+  references: ["https://cwe.mitre.org/data/definitions/1427.html"]
+  fixtures: auto

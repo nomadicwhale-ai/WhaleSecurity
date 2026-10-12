@@ -1,0 +1,2 @@
+# Fixture for WS-AGT-UNI-003. Benign directional marks stay visible for review.
+mark ‎שלום‏ # expect: WS-AGT-UNI-003

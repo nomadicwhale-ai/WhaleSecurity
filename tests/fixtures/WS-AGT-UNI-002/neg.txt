@@ -1,0 +1,5 @@
+# Fixture for WS-AGT-UNI-002. Attack-sample data; benign joiner exemptions.
+Ordinary text and a visible whale 🐋.
+Emoji family 👩‍👩 is a standard ZWJ sequence.
+Persian ب‌ت uses ZWNJ between Arabic letters.
+Devanagari क‌क uses ZWNJ between Indic letters.

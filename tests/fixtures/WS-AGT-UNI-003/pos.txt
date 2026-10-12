@@ -1,0 +1,3 @@
+# Fixture for WS-AGT-UNI-003. Attack-sample data; benign reorder canary.
+canary‮reordered‬ # expect: WS-AGT-UNI-003
+open‮ # expect: WS-AGT-UNI-003

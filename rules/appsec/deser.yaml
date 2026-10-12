@@ -1,0 +1,35 @@
+- id: WS-DES-001
+  title: Unsafe Python deserialization (pickle family)
+  pack: appsec/deser
+  severity: high
+  confidence: medium
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-502]
+  owasp: [A08]
+  applies_to: {kind: code, lang: python}
+  keywords: [pickle, dill, joblib, torch.load, shelve.open, np.load]
+  match:
+    regex: |-
+      \b(?:pickle|cPickle|_pickle|dill|cloudpickle|jsonpickle)\.(?:loads?|Unpickler|decode)\(|\b(?:pd|pandas)\.read_pickle\(|\bjoblib\.load\(|\bshelve\.open\(|\btorch\.load\((?![^)\n]{0,200}\bweights_only[ \t]{0,16}=[ \t]{0,16}True)|\bnp\.load\([^)\n]{0,200}\ballow_pickle[ \t]{0,16}=[ \t]{0,16}True
+  message: Unsafe Python deserialization can execute code embedded in an untrusted blob.
+  fix: Use JSON, Arrow, Parquet or safetensors; if pickle is unavoidable, sign blobs with HMAC and verify first.
+  references: ["https://cwe.mitre.org/data/definitions/502.html"]
+  fixtures: auto
+
+- id: WS-DES-002
+  title: PyYAML or ruamel unsafe load
+  pack: appsec/deser
+  severity: high
+  confidence: high
+  owner: "@whalesecurity/appsec"
+  cwe: [CWE-502]
+  owasp: [A08]
+  applies_to: {kind: code, lang: python}
+  keywords: [yaml, YAML]
+  match:
+    regex: |-
+      \byaml\.(?:unsafe_load(?:_all)?|full_load(?:_all)?)\(|\byaml\.load(?:_all)?\((?![^)\n]{0,200}\b(?:Loader[ \t]{0,16}=[ \t]{0,16})?(?:yaml\.)?C?(?:Safe|Base)Loader\b)|\bYAML\([ \t]{0,16}typ[ \t]{0,16}=[ \t]{0,16}["']unsafe["']
+  message: Unsafe YAML loading can construct objects from untrusted input.
+  fix: Use yaml.safe_load or a SafeLoader; for ruamel use YAML(typ="safe").
+  references: ["https://cwe.mitre.org/data/definitions/502.html"]
+  fixtures: auto

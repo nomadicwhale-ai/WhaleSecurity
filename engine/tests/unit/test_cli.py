@@ -23,6 +23,12 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     for name in ("WHALESCAN_CONFIG", "WHALESCAN_PACKS", "WHALESCAN_FAIL_ON", "WHALESCAN_JOBS"):
         monkeypatch.delenv(name, raising=False)
+    # Unit command contracts use their own rules; bundled seeds are exercised end-to-end separately.
+    from whalescan.rules import loader
+
+    empty_bundle = tmp_path / "empty-bundle.json"
+    empty_bundle.write_text(json.dumps({"schema": loader.BUNDLE_SCHEMA, "rules": []}), encoding="utf-8")
+    monkeypatch.setattr(loader, "BUNDLE_PATH", str(empty_bundle))
     packs = tmp_path / ".whalesecurity" / "rules"
     packs.mkdir(parents=True)
     common = {
@@ -495,6 +501,9 @@ def test_internal_interrupt_broken_pipe(
     monkeypatch.undo()
     # Broken pipe preserves the already computed finding gate.
     monkeypatch.chdir(repo)
+    from whalescan.rules import loader
+
+    monkeypatch.setattr(loader, "BUNDLE_PATH", str(repo / "empty-bundle.json"))
 
     class Broken(io.StringIO):
         def write(self, value: str) -> int:
@@ -578,6 +587,11 @@ def test_config_logging_options(repo: Path) -> None:
     ],
 )
 def test_real_process_exit_codes(repo: Path, arguments: list[str], code: int) -> None:
+    # Fresh subprocesses cannot inherit the empty-bundle monkeypatch; avoid catalog ID collisions.
+    pack = repo / ".whalesecurity/rules/rules.json"
+    raw = json.loads(pack.read_text(encoding="utf-8"))
+    raw[0]["id"] = "WS-INJ-900"
+    pack.write_text(json.dumps(raw), encoding="utf-8")
     proc = subprocess.run(
         [sys.executable, "-m", "whalescan", "--root", str(repo), *arguments],
         input=b"",

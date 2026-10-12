@@ -1,0 +1,4 @@
+# Fixture for WS-AGT-UNI-002. Attack-sample data; benign hidden-character canaries.
+ig​nore # expect: WS-AGT-UNI-002
+join⁠words # expect: WS-AGT-UNI-002
+hy­phen # expect: WS-AGT-UNI-002

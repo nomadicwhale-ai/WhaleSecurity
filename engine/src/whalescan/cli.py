@@ -710,39 +710,11 @@ def _rules(args: argparse.Namespace, cfg: "Config") -> int:
             args.junit,
         )
     if args.action == "test":
-        from .api import Scanner
+        from .rules.testing import fixture_checks, redos_checks
 
-        checks: list[tuple[str, bool, str]] = []
-        for rule in rules:
-            if not args.schema_only:
-                fixture_set = fixtures.discover(args.fixtures, rule.id, rules.fixture_specs.get(rule.id))
-                checks.extend((rule.id, False, p) for p in fixture_set.problems)
-                test_cfg = cfg.with_overrides(
-                    {
-                        "scan.baseline": "",
-                        "scan.min_severity": "info",
-                        "scan.min_confidence": "low",
-                        "suppress.require_reason": True,
-                    }
-                )
-                from .rules.loader import RuleSet
-
-                scanner = Scanner(RuleSet([rule]), test_cfg)
-                for fixture in fixture_set.all:
-                    result = scanner.scan_text(fixture.data, filename=fixture.virtual_path)
-                    verdict = fixtures.evaluate(fixture, [f.line for f in result.findings])
-                    checks.append((fixture.name, verdict.ok, verdict.message))
-            if args.redos:
-                from .rules.lint import iter_patterns
-
-                for pattern in iter_patterns(rule_to_dict(rule)):
-                    checks.append(
-                        (
-                            rule.id + ":" + pattern.where,
-                            _redos(pattern.pattern, pattern.flags),
-                            "ReDoS budget",
-                        )
-                    )
+        checks = [] if args.schema_only else list(fixture_checks(rules, cfg, args.fixtures))
+        if args.redos:
+            checks.extend(redos_checks(rules))
         return _check_output(checks, args.junit)
     selected = list(rules)
     if args.action == "list":
@@ -779,14 +751,15 @@ def _rules(args: argparse.Namespace, cfg: "Config") -> int:
         from .rules.lint import iter_patterns
 
         patterns = list(iter_patterns(doc))
-        if "regex" not in rule.match:
-            raise UsageError("--grep is available only for regex rules")
+        multiline = "multiline" in rule.match and "pattern" in rule.match["multiline"]
+        if "regex" not in rule.match and not multiline:
+            raise UsageError("--grep is available only for regex or multiline pattern rules")
         grep_pattern = patterns[0].pattern
         letters = "".join(flag for flag in patterns[0].flags if flag in ("i", "x"))
         if letters:
             grep_pattern = f"(?{letters})" + grep_pattern
         print(
-            "rg -n -P -e "
+            ("rg -n -U -P -e " if multiline else "rg -n -P -e ")
             + shlex.quote(grep_pattern)
             + " -- "
             + " ".join(shlex.quote(p) for p in rule.applies_to.globs or (".",))
@@ -804,38 +777,9 @@ def _rules(args: argparse.Namespace, cfg: "Config") -> int:
 
 
 def _redos(pattern: str, flags: tuple[str, ...]) -> bool:
-    import json
-    import subprocess
+    from .rules.testing import redos_check
 
-    # Pattern passed as data on stdin, never command arguments; subprocess has a hard kill.
-    script = (
-        "import json,re,sys,time\n"
-        "p,letters=json.load(sys.stdin); bits=re.M\n"
-        "for f in letters: bits |= {'i':re.I,'s':re.S,'a':re.A,'x':re.X}.get(f,0)\n"
-        "rx=re.compile(p,bits); prefix=re.match(r'[A-Za-z0-9_-]+',p.lstrip('^'))\n"
-        "prefix=prefix.group() if prefix else 'literal'\n"
-        "classes=re.findall(r'\\[(?:\\\\.|[^\\]\\\\])+\\]',p); representatives=[]\n"
-        "for cls in classes:\n"
-        " for c in 'aA019bB_ /:!@\\n':\n"
-        "  if re.fullmatch(cls,c,bits): representatives.append(c); break\n"
-        "chars=(representatives+list('aA0 \\n!'))[:6]\n"
-        "inputs=[c*100000 for c in chars]+[(prefix*100000)[:100000], 'a'*100000+'!']\n"
-        "for s in inputs:\n"
-        " start=time.perf_counter(); list(rx.finditer(s))\n"
-        " if time.perf_counter()-start >= .05: sys.exit(1)\n"
-    )
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            input=json.dumps([pattern, flags]).encode(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return False
-    return proc.returncode == 0
+    return redos_check(pattern, flags)
 
 
 def _version(args: argparse.Namespace) -> int:
