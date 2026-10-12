@@ -334,7 +334,8 @@ def test_trusted_only_keys_honored_from_user_env_cli(env: dict[str, str], repo: 
     log_file = str(tmp_path / "w.log")
     cache_dir = str(tmp_path / "cachex")
     user(
-        env, f'[adapters.semgrep]\nbin = "/opt/semgrep"\n[mcp]\nlive = true\n[logging]\nfile = {json.dumps(log_file)}\n'
+        env,
+        f'[adapters.semgrep]\nbin = "/opt/semgrep"\n[mcp]\nlive = true\n[logging]\nfile = {json.dumps(log_file)}\n',
     )
     cfg = load_config(
         repo, env={**env, "WHALESCAN_CACHE_DIR": cache_dir}, overrides={"adapters.osv.allow_network": True}
@@ -591,7 +592,7 @@ def test_resolve_path(env: dict[str, str], repo: Path) -> None:
     cfg = load_config(repo / ".whalesecurity", env=env)
     assert cfg.resolve_path(".whalesecurity/rules") == str(repo / ".whalesecurity" / "rules")
     assert cfg.resolve_path("/abs/x") == os.path.normpath("/abs/x")
-    assert cfg.resolve_path("~/x") == os.path.expanduser("~/x")
+    assert cfg.resolve_path("~/x") == os.path.normpath(os.path.expanduser("~/x"))
 
 
 def test_root_defaults_to_git_toplevel(
